@@ -1,0 +1,73 @@
+# On a version tag, builds the standalone bundle (tests included) and attaches it, the
+# source archive and their checksums to a draft release, which the maintainer publishes.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build, e.g. v0.1.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    name: Bundle and draft the release
+    # The oldest supported runner: the bundle runs on hosts whose glibc is at least as new.
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Check the version
+        run: |
+          version="${TAG#v}"
+          package=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' photon/__init__.py)
+          if [ "$version" != "$package" ]; then
+            echo "::error::tag $TAG does not match __version__ $package in photon/__init__.py"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build the bundle
+        run: python tools/build_bundle.py
+
+      - name: Test
+        run: build/venv/bin/python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Assets
+        # `photon` keeps a fixed name so releases/latest/download/photon always works.
+        run: |
+          test "$(dist/photon --version)" = "photon $VERSION"
+          mkdir release
+          cp dist/photon release/photon
+          git archive --format=tar.gz --prefix="photon-$VERSION/" -o "release/photon-$VERSION.tar.gz" "$TAG"
+          cd release
+          sha256sum photon "photon-$VERSION.tar.gz" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="docs/release-notes/$VERSION.md"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"
+          elif [ -f "$notes" ]; then
+            gh release create "$TAG" release/* --draft --title "Photon $VERSION" --notes-file "$notes" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" release/* --draft --title "Photon $VERSION" --generate-notes --repo "$GITHUB_REPOSITORY"
+          fi

@@ -1,0 +1,39 @@
+# Runs every test and builds the standalone bundle for every push to main and every pull
+# request. Tests never open real devices: transports, sysfs and systemctl are faked.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    name: Test and build (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Build the bundle
+        # Creates build/venv with the pinned requirements, then dist/photon.
+        run: python tools/build_bundle.py
+
+      - name: Test
+        run: build/venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Smoke-test the bundle
+        run: dist/photon --version
