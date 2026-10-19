@@ -6,6 +6,8 @@ import argparse
 import sys
 from collections.abc import Callable
 
+from photon import __version__
+
 
 DEVICE_COMMANDS: dict[str, str] = {
     "g733": "G733 Gaming Headset",
@@ -28,6 +30,7 @@ def _add_color_options(parser: argparse.ArgumentParser, *, zones: bool) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="photon", description=__doc__)
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     apply = subcommands.add_parser("apply", help="apply one color to all available devices")

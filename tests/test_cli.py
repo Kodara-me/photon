@@ -1,10 +1,17 @@
 import unittest
 from unittest import mock
 
+import photon
 from photon import __main__
 
 
 class ControllerCliTests(unittest.TestCase):
+    def test_version_prints_the_package_version(self):
+        with mock.patch("sys.stdout") as output, self.assertRaises(SystemExit) as exit_:
+            __main__.main(["--version"])
+        self.assertEqual(exit_.exception.code, 0)
+        self.assertIn(f"photon {photon.__version__}", "".join(call.args[0] for call in output.write.call_args_list))
+
     def test_motherboard_apply_forwards_options_without_zone_arguments(self):
         command = mock.Mock(return_value=0)
         with mock.patch("tools.photon_motherboard.main", command):
