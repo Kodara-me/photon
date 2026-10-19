@@ -28,6 +28,10 @@ jobs:
         with:
           python-version: '3.14'
 
+      - name: Install build dependencies
+        # hidapi has no prebuilt wheel for this Python, so pip compiles it.
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libusb-1.0-0-dev libudev-dev
+
       - name: Build the bundle
         # Creates build/venv with the pinned requirements, then dist/photon.
         run: python tools/build_bundle.py
