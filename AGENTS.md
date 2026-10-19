@@ -15,7 +15,7 @@ The complete technical plan is in [`docs/PLAN.md`](docs/PLAN.md). The independen
 
 ## Current project status
 
-Planning and read-only investigation are complete. No implementation should be assumed to exist. The repository is intentionally documentation-only until the user explicitly approves implementation.
+Every device in the list above, plus the Gigabyte Z790 AORUS ELITE AX RGB controller, has a backend, a read-only probe and tests. The root systemd service, the standalone bundle and its installer are implemented. Each slice document records what was verified on hardware and what remains open.
 
 The machine inspection found these current USB/hidraw mappings:
 
@@ -77,9 +77,9 @@ static-color packet. Do not scan or write arbitrary SMBus addresses.
 
 Feature IDs such as `0x8070` are not feature indexes. Resolve feature IDs on the device at runtime. Candidate features include `COLOR_LED_EFFECTS (0x8070)`, `RGB_EFFECTS (0x8071)`, and possibly `PER_KEY_LIGHTING_V2 (0x8081)`, but all support must be experimentally verified.
 
-## Expected future structure
+## Structure
 
-Keep the implementation small and separable:
+The original target layout, kept as a guide; the actual modules live flat in `photon/` and one-shot commands in `tools/`. Keep the implementation small and separable:
 
 ```text
 photon/
@@ -95,8 +95,6 @@ photon/
         g502_x_plus.py
         pro_keyboard.py
 ```
-
-Do not create these files until implementation is explicitly approved.
 
 ## Definition of done for the first milestone
 

@@ -1,0 +1,61 @@
+name: Bug
+description: Something does not work as the documentation says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please leave out personal data: device serial numbers and
+        host names are not needed. Stop Solaar and OpenRGB before reproducing, since they
+        compete for the same devices.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. sudo photon apply --color '#8B5CF6'
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Command output
+      description: The failing command run again with `--trace` when it accepts it, and `journalctl -u photon.service -b` for the service.
+      render: text
+  - type: textarea
+    id: check
+    attributes:
+      label: Output of `photon service check`
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Photon version
+      description: "`photon --version`"
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - Logitech G733
+        - Logitech G502 X Plus
+        - Logitech PRO keyboard
+        - Corsair DDR5 RAM
+        - Gigabyte motherboard / fans
+        - Service or installation
+  - type: input
+    id: distribution
+    attributes:
+      label: Distribution and kernel
+      placeholder: "Arch Linux, 6.17.2"

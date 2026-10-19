@@ -1,0 +1,30 @@
+name: Idea or new hardware
+description: A proposal to discuss, including support for another device.
+labels: [idea]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Photon only drives hardware whose protocol was verified on a real device, one small
+        slice at a time (see [CONTRIBUTING.md](https://github.com/jstmichel/photon/blob/main/CONTRIBUTING.md)).
+        For a new device, read-only probe output helps most.
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What Photon would do, from the user's point of view.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The problem it solves, or what it makes easier today.
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware details
+      description: For a new device, its name and `VID:PID` (from `lsusb`), and the output of any related `photon probe … --json`.
+      render: text
