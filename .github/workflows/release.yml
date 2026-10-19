@@ -53,14 +53,16 @@ jobs:
         run: build/venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 
       - name: Assets
-        # `photon` keeps a fixed name so releases/latest/download/photon always works.
+        # `photon` and `get-photon.sh` keep fixed names so releases/latest/download/ always works.
         run: |
           test "$(dist/photon --version)" = "photon $VERSION"
           mkdir release
           cp dist/photon release/photon
           git archive --format=tar.gz --prefix="photon-$VERSION/" -o "release/photon-$VERSION.tar.gz" "$TAG"
+          # The one-command installer, served by releases/latest/download/ too.
+          cp scripts/get-photon.sh release/
           cd release
-          sha256sum photon "photon-$VERSION.tar.gz" > SHA256SUMS
+          sha256sum photon "photon-$VERSION.tar.gz" get-photon.sh > SHA256SUMS
           cat SHA256SUMS
 
       - name: Draft the release

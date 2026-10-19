@@ -37,6 +37,20 @@ The bundle carries its own Python, hidapi and pyudev; the host needs neither Pyt
 
 ## Installation
 
+### One command
+
+```sh
+curl -fsSL https://github.com/jstmichel/photon/releases/latest/download/get-photon.sh | sh
+```
+
+The script downloads the latest bundle, checks it against the release's `SHA256SUMS`, runs
+`photon service check`, asks before installing, then runs `sudo photon service install`. It
+stops early when that version is already installed. Options: `--version v0.1.0`, `--yes`,
+`--dry-run` (pass them with `| sh -s -- --dry-run`). Read it first if you like:
+[scripts/get-photon.sh](scripts/get-photon.sh).
+
+### By hand
+
 Download the bundle of the latest release, check it, and install the service:
 
 ```sh

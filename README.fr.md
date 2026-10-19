@@ -41,6 +41,20 @@ de Python ni de pip.
 
 ## Installation
 
+### En une commande
+
+```sh
+curl -fsSL https://github.com/jstmichel/photon/releases/latest/download/get-photon.sh | sh
+```
+
+Le script télécharge le dernier paquet autonome, le vérifie avec le `SHA256SUMS` de la
+version, lance `photon service check`, demande confirmation, puis lance
+`sudo photon service install`. Il s’arrête tout de suite si cette version est déjà installée.
+Options : `--version v0.1.0`, `--yes`, `--dry-run` (à passer avec `| sh -s -- --dry-run`).
+Vous pouvez le lire avant : [scripts/get-photon.sh](scripts/get-photon.sh).
+
+### À la main
+
 Téléchargez le paquet autonome de la dernière version, vérifiez-le, puis installez le
 service :
 
