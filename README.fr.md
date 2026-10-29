@@ -130,12 +130,22 @@ les échanges du protocole.
 ## Windows (ligne de commande)
 
 Sous Windows, Photon applique la couleur au Logitech G733, au G502 X Plus (filaire ou par
-son récepteur) et au clavier PRO depuis la ligne de commande. La carte mère, la RAM et le
-service en arrière-plan ne sont pas encore disponibles sous Windows ; `photon apply` les
-signale comme indisponibles et applique les autres appareils.
+son récepteur), au clavier PRO et à la carte mère Gigabyte Z790 AORUS ELITE AX, ainsi qu’à
+la RAM Corsair Vengeance RGB DDR5, depuis la ligne de commande. Le service en arrière-plan
+n’est pas encore disponible sous Windows. `photon apply` signale chaque appareil qu’il n’a
+pas pu atteindre, avec la raison, et applique les autres.
 
 Prérequis : Windows 10 ou 11 et `photon.exe` (compilé avec `python tools\build_bundle.py`, qui
-produit `dist\photon.exe`). Ces appareils ne demandent aucun pilote.
+produit `dist\photon.exe`). Les appareils Logitech et la carte mère ne demandent aucun pilote.
+
+La RAM demande [PawnIO](https://pawnio.eu), un pilote signé que vous installez vous-même avec
+son installateur officiel ; Photon n’installe, ne met à jour et ne supprime aucun pilote.
+`photon.exe` embarque le module SMBus i801 signé de PawnIO et utilise `PawnIOLib.dll` dans
+`%ProgramFiles%\PawnIO`. La RAM n’est atteinte que depuis une **invite de commandes
+élevée** (Exécuter en tant qu’administrateur). Sans PawnIO, sans élévation, ou tant qu’un
+autre programme tient le mutex SMBus de Windows, la RAM est signalée comme indisponible avec
+la raison et les autres appareils sont quand même appliqués. Fermez les moniteurs matériels
+qui lisent le SMBus si le mutex reste occupé.
 
 Désactivez d’abord l’éclairage des logiciels constructeurs. Photon n’arrête, ne reconfigure
 et ne détecte aucun autre logiciel, et un appareil qu’un autre programme occupe est signalé

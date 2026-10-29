@@ -12,7 +12,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-try:  # Linux-only: the Windows implementation arrives with its own task.
+from .host import is_windows, load_hid_backend
+
+try:  # Linux-only: Windows goes through hidapi feature reports.
     import fcntl
 except ImportError:  # pragma: no cover - Windows
     fcntl = None  # type: ignore[assignment]
@@ -32,12 +34,20 @@ VERIFIED_INFO = {
 }
 REPORT_ID = 0xCC
 REPORT_LENGTH = 64
+# Windows identity (D11): the controller as hidapi enumerates it.
+VENDOR_ID = 0x048D
+PRODUCT_ID = 0x5702
+INTERFACE_NUMBER = 0
+USAGE_PAGE = 0xFF89
+FEATURE_USAGE = 0x00CC  # the collection that carries feature report 0xCC
 # Measured 2026-10-02: FF89:0010 / 5A:16 bytes; FF89:00CC / CC:63 bytes.
 # Match the complete known descriptor rather than guessing a feature-report layout.
 EXPECTED_DESCRIPTOR = bytes.fromhex(
     "06 89 ff 09 10 a1 01 85 5a 09 01 15 00 26 ff 00 75 08 95 10 b1 00 c0 "
     "06 89 ff 09 cc a1 01 85 cc 09 01 15 00 26 ff 00 75 08 95 3f b1 00 c0"
 )
+# The collection of EXPECTED_DESCRIPTOR that carries report 0xCC (usage page FF89, usage CC).
+FEATURE_COLLECTION_DESCRIPTOR = EXPECTED_DESCRIPTOR[EXPECTED_DESCRIPTOR.index(bytes.fromhex("06 89 ff 09 cc")):]
 # Protocol-reference indexes, not a claim about the fans' physical wiring.
 HEADERS = {"d-led1": 5, "d-led2": 6, "led-c1": 1, "led-c2": 4}
 # Eight effect banks (CC20..CC27) in the protocol reference. Their physical
@@ -154,7 +164,13 @@ def query_info(fd: int, *, trace: Trace | None = None) -> dict:
     result = fcntl.ioctl(fd, 0xC0004807 | (len(buffer) << 16), buffer, True)
     if trace:
         trace("rx", bytes(buffer))
-    if result != REPORT_LENGTH or buffer[0] != REPORT_ID:
+    if result != REPORT_LENGTH:
+        raise RuntimeError("unexpected ITE controller information report")
+    return parse_info(buffer)
+
+
+def parse_info(buffer: bytes | bytearray) -> dict:
+    if len(buffer) != REPORT_LENGTH or buffer[0] != REPORT_ID:
         raise RuntimeError("unexpected ITE controller information report")
     return {
         "product": buffer[1],
@@ -189,8 +205,114 @@ def _open_controller(controller: Controller) -> int:
         raise RuntimeError(f"motherboard RGB access to {controller.node} requires root; run with sudo") from exc
 
 
+@dataclass(frozen=True)
+class WindowsController:
+    path: bytes
+
+
+def _text(value) -> str:
+    return value.decode(errors="replace") if isinstance(value, bytes) else str(value)
+
+
+def discover_windows_controller(hid_backend=None, board_product=None) -> WindowsController:
+    """Find the one verified ITE controller from hidapi's enumeration (D11).
+
+    The board product, VID:PID, interface, usage page and usage must all match; any
+    difference refuses with the reason before anything is opened or written.
+    """
+    if board_product is None:
+        from .windows_firmware import base_board_product as board_product
+    product = board_product()
+    if product != BOARD_NAME:
+        raise RuntimeError(f"motherboard RGB is supported only on the verified {BOARD_NAME} (this board is {product!r})")
+    hid_backend = hid_backend or load_hid_backend()
+    candidates = [e for e in hid_backend.enumerate(VENDOR_ID, PRODUCT_ID)
+                  if (e.get("vendor_id"), e.get("product_id")) == (VENDOR_ID, PRODUCT_ID)]
+    if not candidates:
+        raise RuntimeError("expected one verified ITE RGB controller; found 0")
+    matching = [
+        e for e in candidates
+        if e.get("interface_number") == INTERFACE_NUMBER
+        and e.get("usage_page") == USAGE_PAGE
+        and e.get("usage") == FEATURE_USAGE
+    ]
+    if len(matching) != 1:
+        raise RuntimeError(
+            "ITE USB identity/interface does not match the verified controller "
+            f"(interface {INTERFACE_NUMBER}, usage page 0x{USAGE_PAGE:04X}, usage 0x{FEATURE_USAGE:04X}; "
+            f"found {len(matching)})"
+        )
+    return WindowsController(matching[0]["path"])
+
+
+def _validate_windows_descriptor(device) -> None:
+    reader = getattr(device, "get_report_descriptor", None)
+    if reader is None:
+        return  # hidapi does not expose it: the information reply stays the identity check.
+    descriptor = bytes(reader())
+    if descriptor and descriptor not in (EXPECTED_DESCRIPTOR, FEATURE_COLLECTION_DESCRIPTOR):
+        raise RuntimeError("ITE HID descriptor differs from the verified feature-report layout")
+
+
+def _windows_send(device, packet: bytes, trace: Trace | None) -> None:
+    if len(packet) != REPORT_LENGTH or packet[0] != REPORT_ID:
+        raise ValueError("invalid ITE feature-report framing")
+    if trace:
+        trace("tx", packet)
+    result = device.send_feature_report(packet)
+    if result != len(packet):
+        raise RuntimeError(f"short feature-report write: {result}/{len(packet)}")
+
+
+def _windows_query_info(device, trace: Trace | None) -> dict:
+    _windows_send(device, cc_report(0x60), trace)  # Information selector; no lighting change.
+    reply = bytes(device.get_feature_report(REPORT_ID, REPORT_LENGTH))
+    if trace:
+        trace("rx", reply)
+    return parse_info(reply)
+
+
+def _open_windows(controller: WindowsController, hid_backend=None):
+    device = (hid_backend or load_hid_backend()).device()
+    try:
+        device.open_path(controller.path)
+    except OSError as exc:
+        raise RuntimeError(f"cannot open the motherboard RGB controller ({exc}); it may be held by another program") from exc
+    try:
+        _validate_windows_descriptor(device)
+    except Exception:
+        device.close()
+        raise
+    return device
+
+
+def _read_windows_info(trace: Trace | None, hid_backend=None, board_product=None) -> dict:
+    controller = discover_windows_controller(hid_backend, board_product)
+    device = _open_windows(controller, hid_backend)
+    try:
+        return {**_windows_query_info(device, trace), "hidraw": _text(controller.path), "board": BOARD_NAME}
+    finally:
+        device.close()
+
+
+def _apply_windows(color: tuple[int, int, int], trace: Trace | None, hid_backend=None, board_product=None) -> None:
+    reports = static_slot_reports(list(RGB_SLOTS), color)
+    controller = discover_windows_controller(hid_backend, board_product)
+    device = _open_windows(controller, hid_backend)
+    try:
+        # The information reply is the readiness check: no lighting report is sent unless it matches.
+        validate_info(_windows_query_info(device, trace))
+        for packet in reports:
+            _windows_send(device, packet, trace)
+            time.sleep(0.05)
+    finally:
+        device.close()
+
+
 def read_controller_info(*, trace: Trace | None = None) -> dict:
     """Query the identified controller, with no RGB changes, then close it."""
+    if is_windows():
+        return _read_windows_info(trace)
     controller = discover_controller()
     fd = _open_controller(controller)
     try:
@@ -202,6 +324,8 @@ def read_controller_info(*, trace: Trace | None = None) -> dict:
 
 def apply_static_color(color: tuple[int, int, int], *, trace: Trace | None = None) -> None:
     """Validate readiness/identity, apply to all eight RGB slots once, then close."""
+    if is_windows():
+        return _apply_windows(color, trace)
     reports = static_slot_reports(list(RGB_SLOTS), color)
     controller = discover_controller()
     require_rgb_apps_absent()

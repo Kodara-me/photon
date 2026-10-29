@@ -125,12 +125,21 @@ protocol traffic.
 ## Windows (command line)
 
 On Windows, Photon sets the color on the Logitech G733, G502 X Plus (wired or through its
-receiver) and PRO keyboard from the command line. The motherboard, the RAM and the
-background service are not available on Windows yet; `photon apply` reports them as
-unavailable and applies the other devices.
+receiver), PRO keyboard and Gigabyte Z790 AORUS ELITE AX motherboard, and on the Corsair
+Vengeance RGB DDR5 RAM, from the command line. The background service is not available on
+Windows yet. `photon apply` reports every device it could not reach, with the reason, and
+applies the others.
 
 Requirements: Windows 10 or 11 and `photon.exe` (built with `python tools\build_bundle.py`,
-which produces `dist\photon.exe`). No driver is needed for these devices.
+which produces `dist\photon.exe`). The Logitech devices and the motherboard need no driver.
+
+The RAM needs [PawnIO](https://pawnio.eu), a signed driver that you install yourself from
+its official installer; Photon never installs, updates or removes a driver. `photon.exe`
+carries PawnIO's signed i801 SMBus module and uses `PawnIOLib.dll` from
+`%ProgramFiles%\PawnIO`. The RAM is also reached only from an **elevated prompt** (Run as
+administrator). Without PawnIO, without elevation, or while another program holds the
+Windows SMBus mutex, the RAM is reported unavailable with the reason and the other devices
+are still applied. Close hardware monitors that read the SMBus if the mutex stays busy.
 
 Disable the vendor lighting first. Photon does not stop, reconfigure or detect other
 software, and a device that another program holds is reported as unavailable:

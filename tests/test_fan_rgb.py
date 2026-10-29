@@ -1,6 +1,7 @@
 import contextlib
 import io
 import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +21,12 @@ HOST_REPLY = bytes.fromhex(
 
 
 class FanRgbTests(unittest.TestCase):
+    def setUp(self):
+        # These tests cover the Linux hidraw path, whatever host runs the suite.
+        patcher = mock.patch.object(sys, "platform", "linux")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_static_packet_matches_protocol_and_uses_only_selected_bank(self):
         reports = fan_rgb.static_reports(["led-c1"], (0x12, 0x34, 0x56))
         expected_effect = bytes.fromhex(

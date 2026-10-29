@@ -1,6 +1,8 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from photon.corsair_ram import (
     RAM_COLOR_COMMAND,
@@ -40,6 +42,10 @@ class FakeBus:
 
 class CorsairRamTests(unittest.TestCase):
     def setUp(self):
+        # The sysfs discovery under test is the Linux one, whatever host runs the suite.
+        patcher = mock.patch.object(sys, "platform", "linux")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         FakeBus.instances = []
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
