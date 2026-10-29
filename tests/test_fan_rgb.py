@@ -56,11 +56,13 @@ class FanRgbTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 fan_rgb.static_slot_reports(slots, (0, 255, 0))
 
+    @unittest.skipIf(fan_rgb.fcntl is None, "hidraw ioctls are Linux-only")
     def test_short_write_is_not_reported_as_success(self):
         with mock.patch.object(fan_rgb.fcntl, "ioctl", return_value=12), contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(RuntimeError, "short feature-report write"):
                 fan_rgb.send_feature(9, fan_rgb.cc_report(0x60))
 
+    @unittest.skipIf(fan_rgb.fcntl is None, "hidraw ioctls are Linux-only")
     def test_information_reply_and_open_device_identity(self):
         def ioctl(_fd, command, buffer, _mutate):
             if command == 0x80084803:

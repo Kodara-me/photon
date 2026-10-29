@@ -2,6 +2,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+from photon import monitor
 from photon.monitor import DeviceMonitor, event_identity, target_for_event, run_monitor
 
 
@@ -79,6 +80,7 @@ class DeviceMonitorTests(unittest.TestCase):
         self.assertEqual(apply.call_count, 4)
         self.assertEqual(delays, [0.5, 1.0, 2.0])
 
+    @unittest.skipIf(monitor.pyudev is None, "pyudev is Linux-only")
     def test_udev_subscription_starts_before_startup_application(self):
         udev = mock.Mock()
         udev.poll.return_value = None

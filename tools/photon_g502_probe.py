@@ -21,6 +21,7 @@ from photon.g502_x_plus import (
     discover_rgb_features,
 )
 from photon.g733 import RGB_EFFECTS
+from photon.host import is_hidpp_channel
 from photon.hid_transport import HidTransport, HidTransportError
 from photon.hidpp import DEFAULT_DEVICE_INDEX, HidppClient, HidppError
 from tools.photon_enumerate import enumerate_devices
@@ -57,7 +58,7 @@ def g502_probe_candidates(devices: list[dict] | None = None) -> list[ProbeCandid
                 report_ids = set(interface.get("report_ids") or ())
                 # The HID descriptor verifies this is the receiver's vendor
                 # HID++ channel; do not assume an interface number.
-                if {0x10, 0x11}.issubset(report_ids):
+                if is_hidpp_channel(report_ids):
                     candidates.extend(
                         ProbeCandidate(interface, device_index, "receiver")
                         for device_index in RECEIVER_SLOT_INDICES

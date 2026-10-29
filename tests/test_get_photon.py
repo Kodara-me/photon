@@ -7,6 +7,7 @@ a few plain tools, so a real sudo or service install is never reachable.
 import hashlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,7 @@ esac
 
 
 @unittest.skipUnless(shutil.which("setsid"), "setsid is needed to run without a terminal")
+@unittest.skipIf(sys.platform == "win32", "get-photon.sh is the Linux installer")
 class GetPhotonTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()

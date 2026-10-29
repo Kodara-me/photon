@@ -11,7 +11,10 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-import pyudev
+try:  # Linux-only event source
+    import pyudev
+except ImportError:  # pragma: no cover - Windows
+    pyudev = None  # type: ignore[assignment]
 
 from .config import DEFAULT_CONFIG_PATH, format_color, resolve_color
 from .g733_notifications import G733NotificationManager
