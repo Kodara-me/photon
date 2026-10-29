@@ -2,7 +2,7 @@
 
 ## Project purpose
 
-Photon is a deliberately small Linux-native RGB service for this specific machine and these Logitech devices. The Logitech devices also work from the command line on Windows (`photon apply`, `g733`, `g502`, `keyboard` and their probes); the Windows-specific choices live in `photon/host.py`, the RAM, the motherboard and the service are Linux-only until their own tasks:
+Photon is a deliberately small Linux-native RGB service for this specific machine and these Logitech devices. The Logitech devices also work from the command line on Windows (`photon apply`, `g733`, `g502`, `keyboard`, `motherboard`, `ram` and their probes); the Windows-specific choices live in `photon/host.py`, `photon/pawnio.py` and `photon/windows_firmware.py` (the RAM goes through PawnIO, elevated, with the i801 module pinned and checked by `tools/build_bundle.py`), and the service is Linux-only until its own task:
 
 - Logitech G502 X PLUS (`046d:c095`)
 - Logitech PRO Gaming Keyboard (`046d:c339`)

@@ -18,7 +18,6 @@ from photon.g502_x_plus import claim_rgb_control, prepare_rgb_effects, set_g502_
 from photon.g733 import discover_capabilities as discover_g733_capabilities
 from photon.g733 import discover_rgb_features, set_zone_color
 from photon.hid_transport import HidTransport
-from photon.host import is_windows
 from photon.hidpp import HidppClient
 from photon.pro_keyboard import claim_led_control
 from photon.gigabyte_rgb import apply_static_color as apply_motherboard_color
@@ -26,10 +25,6 @@ from tools.photon_g502_probe import probe_interfaces as probe_g502_interfaces, s
 from tools.photon_hidpp_query import _g733_path
 from tools.photon_keyboard_color import select_keyboard_probe
 from tools.photon_keyboard_probe import probe_interfaces as probe_keyboard_interfaces
-
-
-# The RAM and motherboard need a Windows SMBus and HID path of their own.
-WINDOWS_NOT_YET = "not supported on Windows yet"
 
 
 @dataclass(frozen=True)
@@ -88,8 +83,6 @@ def _apply_keyboard(color, trace_enabled: bool) -> str:
 
 
 def _apply_ram(color, trace_enabled: bool) -> list[str]:
-    if is_windows():
-        raise RuntimeError(WINDOWS_NOT_YET)
     modules = discover_modules()
     for module in modules:
         set_module_color(module, color)
@@ -104,8 +97,6 @@ def _apply_ram(color, trace_enabled: bool) -> list[str]:
 
 
 def _apply_motherboard(color, trace_enabled: bool) -> str:
-    if is_windows():
-        raise RuntimeError(WINDOWS_NOT_YET)
     apply_motherboard_color(color, trace=_trace(trace_enabled))
     return "Gigabyte motherboard/fan RGB (8 slots)"
 

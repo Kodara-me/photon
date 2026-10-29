@@ -174,7 +174,7 @@ def windows(backend):
     """Run as Windows, with the fake hidapi backend behind enumeration and transport."""
     with mock.patch.object(sys, "platform", "win32"), \
             mock.patch.object(photon_enumerate, "hid", backend), \
-            mock.patch("photon.hid_transport.hid", backend):
+            mock.patch("photon.hid_transport.hid", backend),             mock.patch("photon.gigabyte_rgb.load_hid_backend", return_value=backend),             mock.patch("photon.windows_firmware.base_board_product", return_value="Some Other Board"),             mock.patch("photon.windows_firmware.memory_part_numbers", return_value=["CMH64GX5M2B5600C40"]),             mock.patch("photon.pawnio.find_library", return_value=None):
         yield
 
 
@@ -249,11 +249,15 @@ class WindowsApplyTests(unittest.TestCase):
             result = photon_apply.apply_available(RED, only="keyboard")
         self.assertEqual(result.applied, ("PRO Gaming Keyboard (3 zone(s))",))
 
-    def test_ram_and_motherboard_are_reported_unavailable_not_attempted(self):  # R1
+    def test_ram_and_motherboard_are_reported_unavailable_with_their_reason(self):  # R1, R3, R6
         with windows(FakeHidBackend(g733())):
-            result = photon_apply.apply_available(RED, only="ram")
-        self.assertEqual(result.applied, ())
-        self.assertEqual(result.failures, ("Corsair RAM: not supported on Windows yet",))
+            ram = photon_apply.apply_available(RED, only="ram")
+            board = photon_apply.apply_available(RED, only="motherboard")
+        self.assertEqual(ram.applied, ())
+        self.assertEqual(len(ram.failures), 1)
+        self.assertIn("PawnIO is not installed", ram.failures[0])
+        self.assertEqual(board.applied, ())
+        self.assertIn("verified Z790 AORUS ELITE AX", board.failures[0])
 
 
 class WindowsCommandLineTests(unittest.TestCase):
