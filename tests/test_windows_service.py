@@ -466,12 +466,16 @@ class ServiceInstallTests(unittest.TestCase):
     def test_the_data_directory_is_limited_to_administrators_and_system(self):  # R19, D16
         self.install()
         self.assertTrue(self.layout.data_directory.is_dir())
-        owner, reset, grant = self.acl_calls
+        first_grant, owner, reset, grant = self.acl_calls
         folder = str(self.layout.data_directory)
-        for command in (owner, reset, grant):
+        for command in (first_grant, owner, reset, grant):
             self.assertEqual(command[1], folder)
             self.assertTrue(command[0].lower().endswith("icacls.exe"))
             self.assertTrue(Path(command[0]).is_absolute() or ":" in command[0])  # full path, not a bare name
+            # Every step acts on a link itself, never on its target.
+            self.assertEqual(command[-1], "/L")
+        # The restricted grant comes first too, so Users cannot create files meanwhile.
+        self.assertEqual(first_grant, grant)
         # The owner becomes Administrators for the folder and everything in it, links not followed.
         self.assertEqual(owner[2:], ["/setowner", "*S-1-5-32-544", "/T", "/C", "/L"])
         # Children go back to inherited permissions only, recursively.
@@ -489,7 +493,68 @@ class ServiceInstallTests(unittest.TestCase):
 
     def test_the_ownership_is_taken_before_the_permissions_are_set(self):  # D16
         self.install()
-        self.assertEqual([call[2] for call in self.acl_calls], ["/setowner", "/reset", "/inheritance:r"])
+        self.assertEqual([call[2] for call in self.acl_calls],
+                         ["/inheritance:r", "/setowner", "/reset", "/inheritance:r"])
+
+    def assert_refused_without_install(self, message):
+        self.assertRegex(message, r"junction or symbolic link")
+        self.assertEqual(self.manager.calls, [])
+        self.assertFalse(self.layout.config_path.exists())
+        self.assertFalse(self.layout.executable.exists())
+
+    def test_a_data_directory_that_is_a_junction_is_refused_before_any_change(self):  # D16
+        link = self.layout.data_directory
+        with self.assertRaises(RuntimeError) as raised:
+            self.install(is_link=lambda path: path == link)
+        self.assertIn(str(link), str(raised.exception))
+        self.assertIn("Nothing was changed", str(raised.exception))
+        self.assertEqual(self.acl_calls, [])
+        self.assert_refused_without_install(str(raised.exception))
+
+    def test_a_junction_inside_the_data_directory_is_refused_before_any_change(self):  # D16
+        self.layout.data_directory.mkdir(parents=True)
+        child = self.layout.data_directory / "photon.log"
+        child.mkdir()
+        with self.assertRaises(RuntimeError) as raised:
+            self.install(is_link=lambda path: path == child)
+        self.assertIn(str(child), str(raised.exception))
+        self.assertEqual(self.acl_calls, [])
+        self.assert_refused_without_install(str(raised.exception))
+
+    def test_a_folder_swapped_for_a_junction_after_the_ownership_change_is_refused(self):  # D16
+        swapped = lambda path: any(call[2] == "/setowner" for call in self.acl_calls)
+        with self.assertRaises(RuntimeError) as raised:
+            self.install(is_link=swapped)
+        # Checked right after the owner changed: nothing else is run on the folder.
+        self.assertEqual([call[2] for call in self.acl_calls], ["/inheritance:r", "/setowner"])
+        self.assertIn("was not installed", str(raised.exception))
+        self.assert_refused_without_install(str(raised.exception))
+
+    def test_a_folder_swapped_for_a_junction_before_the_last_grant_is_refused(self):  # D16
+        swapped = lambda path: any(call[2] == "/reset" for call in self.acl_calls)
+        with self.assertRaises(RuntimeError) as raised:
+            self.install(is_link=swapped)
+        self.assertEqual([call[2] for call in self.acl_calls],
+                         ["/inheritance:r", "/setowner", "/reset", "/inheritance:r"])
+        self.assert_refused_without_install(str(raised.exception))
+
+    def test_reparse_points_are_detected_without_following_them(self):  # D16
+        root = Path(self.directory.name) / "links"
+        target = root / "target"
+        target.mkdir(parents=True)
+        plain = root / "plain"
+        plain.mkdir()
+        self.assertFalse(windows_service.is_reparse_point(plain))
+        self.assertFalse(windows_service.is_reparse_point(root / "missing"))
+        link = root / "link"
+        if sys.platform == "win32":
+            import _winapi
+
+            _winapi.CreateJunction(str(target), str(link))  # needs no privilege
+        else:
+            os.symlink(target, link)
+        self.assertTrue(windows_service.is_reparse_point(link))
+        self.assertTrue(link.is_dir())  # what mkdir(exist_ok=True) relied on
 
     def test_a_failing_icacls_names_the_folder(self):  # D16
         import subprocess

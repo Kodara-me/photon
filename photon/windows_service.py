@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -280,31 +282,79 @@ def _require_elevated(elevated: Callable[[], bool]) -> None:
         raise RuntimeError(ELEVATION_MESSAGE)
 
 
+def is_reparse_point(path: Path) -> bool:
+    """Whether ``path`` itself is a junction, a symbolic link or another reparse point."""
+    try:
+        status = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    attributes = getattr(status, "st_file_attributes", None)
+    if attributes is None:  # not Windows
+        return stat.S_ISLNK(status.st_mode)
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _find_link(directory: Path, is_link: Callable[[Path], bool]) -> Path | None:
+    """The first junction or link at ``directory`` or anywhere under it, never followed."""
+    if is_link(directory):
+        return directory
+    if not directory.is_dir():
+        return None
+    for child in sorted(directory.iterdir()):
+        found = _find_link(child, is_link)
+        if found is not None:
+            return found
+    return None
+
+
+def _refuse_links(directory: Path, is_link: Callable[[Path], bool], changed: bool) -> None:
+    link = _find_link(directory, is_link)
+    if link is None:
+        return
+    what = "is" if link == directory else f"contains {link}, which is"
+    raise RuntimeError(
+        f"{directory} {what} a junction or symbolic link, not a real folder or file; Photon will "
+        "not secure or write through it. Remove the link (rmdir or del removes only the link, "
+        "not its target) and run the install again. "
+        + ("The service was not installed" if changed else "Nothing was changed")
+    )
+
+
 def secure_data_directory(directory: Path, run: Callable[..., Any] = subprocess.run,
-                          icacls: Path | None = None) -> None:
+                          icacls: Path | None = None,
+                          is_link: Callable[[Path], bool] = is_reparse_point) -> None:
     """Create ``%ProgramData%\\Photon`` with writes limited to Administrators and SYSTEM.
 
     The configuration is read and the log written by a LocalSystem service, so nobody else
     may be able to write there or to change the folder's permissions. The folder may exist
-    already, created by an ordinary user who then owns it (and keeps ``WRITE_DAC``), so:
+    already, created by an ordinary user who then owns it (and keeps ``WRITE_DAC``), and who
+    may have turned it, or something in it, into a junction pointing elsewhere. So:
 
-    1. the owner of the folder and of everything in it becomes Administrators;
-    2. everything in it goes back to inherited permissions only (no explicit ACEs left);
-    3. the folder stops inheriting from ProgramData and grants SYSTEM and Administrators full
-       control and Users read access; the children inherit exactly that.
+    0. the install is refused when the folder or anything in it is a junction or link;
+    1. the folder stops inheriting from ProgramData and grants SYSTEM and Administrators full
+       control and Users read access, so Users can no longer create files in it;
+    2. the owner of the folder and of everything in it becomes Administrators; the links are
+       looked for again, now that the user no longer owns the folder and cannot swap it;
+    3. everything in it goes back to inherited permissions only (no explicit ACEs left);
+    4. step 1 again, since step 3 made the folder inherit from ProgramData; the links are
+       looked for a last time, before anything is written in the folder.
 
-    ``/L`` keeps icacls from following links inside the folder.
+    ``/L`` on every step makes icacls act on a link itself, never on its target.
     """
+    _refuse_links(directory, is_link, changed=False)
     directory.mkdir(parents=True, exist_ok=True)
+    _refuse_links(directory, is_link, changed=False)
     tool = str(icacls or system_folder() / "icacls.exe")
     folder = str(directory)
+    restrict = [tool, folder, "/inheritance:r", "/grant:r", f"{SYSTEM_SID}:(OI)(CI)F",
+                f"{ADMINISTRATORS_SID}:(OI)(CI)F", f"{USERS_SID}:(OI)(CI)RX", "/L"]
     steps = (
-        [tool, folder, "/setowner", ADMINISTRATORS_SID, "/T", "/C", "/L"],
-        [tool, folder, "/reset", "/T", "/C", "/L"],
-        [tool, folder, "/inheritance:r", "/grant:r", f"{SYSTEM_SID}:(OI)(CI)F",
-         f"{ADMINISTRATORS_SID}:(OI)(CI)F", f"{USERS_SID}:(OI)(CI)RX"],
+        (restrict, False),
+        ([tool, folder, "/setowner", ADMINISTRATORS_SID, "/T", "/C", "/L"], True),
+        ([tool, folder, "/reset", "/T", "/C", "/L"], False),
+        (restrict, True),
     )
-    for command in steps:
+    for command, check_links_after in steps:
         try:
             run(command, check=True, capture_output=True)
         except subprocess.CalledProcessError as exc:
@@ -315,6 +365,8 @@ def secure_data_directory(directory: Path, run: Callable[..., Any] = subprocess.
                 f"cannot restrict the permissions of {directory} (icacls {command[2]} failed with "
                 f"exit code {exc.returncode}): {detail.strip()}"
             ) from exc
+        if check_links_after:
+            _refuse_links(directory, is_link, changed=True)
 
 
 def _is_bundle(executable: Path) -> bool:
@@ -372,11 +424,12 @@ def check_dependencies(*, importer: Callable[[str], Any] = import_module,
 
 def install(executable: Path, *, manager: ServiceManager, layout: Layout,
             elevated: Callable[[], bool] = is_elevated, run: Callable[..., Any] = subprocess.run,
-            is_bundle: Callable[[Path], bool] = _is_bundle) -> None:
+            is_bundle: Callable[[Path], bool] = _is_bundle,
+            is_link: Callable[[Path], bool] = is_reparse_point) -> None:
     _require_elevated(elevated)
     if not is_bundle(executable):
         raise RuntimeError("service install must be run from the standalone executable (dist\\photon.exe)")
-    secure_data_directory(layout.data_directory, run)
+    secure_data_directory(layout.data_directory, run, is_link=is_link)
     if not layout.config_path.exists():
         layout.config_path.write_text(f'color = "{DEFAULT_COLOR_HEX}"\n', encoding="utf-8")
         print(f"Created {layout.config_path} with the default color.")
