@@ -466,15 +466,41 @@ class ServiceInstallTests(unittest.TestCase):
     def test_the_data_directory_is_limited_to_administrators_and_system(self):  # R19, D16
         self.install()
         self.assertTrue(self.layout.data_directory.is_dir())
-        (command,) = self.acl_calls
-        self.assertEqual(command[:2], ["icacls", str(self.layout.data_directory)])
-        self.assertIn("/inheritance:r", command)
+        owner, reset, grant = self.acl_calls
+        folder = str(self.layout.data_directory)
+        for command in (owner, reset, grant):
+            self.assertEqual(command[1], folder)
+            self.assertTrue(command[0].lower().endswith("icacls.exe"))
+            self.assertTrue(Path(command[0]).is_absolute() or ":" in command[0])  # full path, not a bare name
+        # The owner becomes Administrators for the folder and everything in it, links not followed.
+        self.assertEqual(owner[2:], ["/setowner", "*S-1-5-32-544", "/T", "/C", "/L"])
+        # Children go back to inherited permissions only, recursively.
+        self.assertEqual(reset[2:], ["/reset", "/T", "/C", "/L"])
+        # Then the folder stops inheriting from ProgramData and grants only these.
+        self.assertIn("/inheritance:r", grant)
+        self.assertNotIn("/T", grant)
+        command = grant
         grants = [part for part in command if part.startswith("*S-")]
         self.assertEqual(sorted(grants), sorted([
             "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-32-545:(OI)(CI)RX"]))
         # Write or modify rights go to SYSTEM and Administrators only.
         writers = [part for part in grants if part.endswith(":(OI)(CI)F")]
         self.assertEqual(sorted(part.split(":")[0] for part in writers), ["*S-1-5-18", "*S-1-5-32-544"])
+
+    def test_the_ownership_is_taken_before_the_permissions_are_set(self):  # D16
+        self.install()
+        self.assertEqual([call[2] for call in self.acl_calls], ["/setowner", "/reset", "/inheritance:r"])
+
+    def test_a_failing_icacls_names_the_folder(self):  # D16
+        import subprocess
+
+        def run(command, **kwargs):
+            raise subprocess.CalledProcessError(5, command, stderr=b"Access is denied.")
+
+        with self.assertRaisesRegex(RuntimeError, "cannot restrict the permissions of .*Photon.*Access is denied"):
+            self.install(run=run)
+        self.assertEqual(self.manager.calls, [])
+        self.assertFalse(self.layout.executable.exists())
 
     def test_a_second_install_upgrades_and_restarts_the_service(self):  # R8
         self.install()
@@ -511,6 +537,16 @@ class ServiceInstallTests(unittest.TestCase):
         self.assertIsNone(self.manager.state())
         self.assertFalse(self.layout.install_directory.exists())
         self.assertTrue(self.layout.config_path.is_file())
+
+    def test_uninstall_from_the_installed_executable_changes_nothing(self):  # R10
+        self.install()
+        self.manager.calls.clear()
+        with self.assertRaisesRegex(RuntimeError, "another copy"):
+            windows_service.uninstall(manager=self.manager, layout=self.layout,
+                                      executable=self.layout.executable, elevated=lambda: True)
+        self.assertEqual(self.manager.calls, [])
+        self.assertTrue(self.layout.executable.is_file())
+        self.assertEqual(self.manager.state(), "running")
 
     def test_uninstall_without_a_service_still_removes_the_executable(self):  # R10
         self.layout.install_directory.mkdir(parents=True)
@@ -800,10 +836,11 @@ class ServiceHostTests(unittest.TestCase):
         self.assertEqual(fake.resumes, 1)
 
     def test_a_stop_before_the_monitor_exists_ends_it_at_once(self):
-        fake, host_ = self.host()
+        factory = mock.Mock()
+        host_ = ServiceHost("config.toml", factory)
         host_.stop()
         host_.run()
-        self.assertTrue(fake.stopped)
+        factory.assert_not_called()  # no subscription and no startup apply
 
 
 class FakeFramework:
@@ -897,12 +934,14 @@ class SafeFolderTests(unittest.TestCase):
         self.assertEqual(host.program_files_folders(answers.get), [Path("C:/Program Files")])
         self.assertEqual(host.program_files_folders(lambda folder_id: None), [])
 
-    def test_program_data_falls_back_to_the_environment_then_the_default(self):
+    def test_program_data_falls_back_to_the_fixed_default_never_the_environment(self):
         with mock.patch.dict(os.environ, {"ProgramData": "D:\\PD"}):
-            self.assertEqual(host.program_data_folder(lambda folder_id: None), Path("D:\\PD"))
-            self.assertEqual(host.program_data_folder(lambda folder_id: Path("C:/PD")), Path("C:/PD"))
-        with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(host.program_data_folder(lambda folder_id: None), Path(host.WINDOWS_DEFAULT_PROGRAM_DATA))
+            self.assertEqual(host.program_data_folder(lambda folder_id: Path("C:/PD")), Path("C:/PD"))
+
+    def test_system32_comes_from_the_shell_with_a_fixed_fallback(self):
+        self.assertEqual(host.system_folder(lambda folder_id: Path("C:/Windows/System32")), Path("C:/Windows/System32"))
+        self.assertEqual(host.system_folder(lambda folder_id: None), Path(host.WINDOWS_DEFAULT_SYSTEM32))
 
     def test_a_known_folder_is_unavailable_off_windows(self):
         with mock.patch.object(host, "is_windows", return_value=False):

@@ -249,7 +249,7 @@ photon.exe service uninstall
 ```
 
 La commande arrête et retire le service et `%ProgramFiles%\Photon\photon.exe`, et conserve
-`%ProgramData%\Photon\config.toml`.
+`%ProgramData%\Photon\config.toml`. Lancez-la depuis une autre copie de `photon.exe` (par exemple celle téléchargée), pas depuis celle installée, qui ne peut pas se supprimer elle-même.
 
 ## Compilation depuis les sources
 
