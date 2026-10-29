@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover - Windows
     pyudev = None  # type: ignore[assignment]
 
 from .config import DEFAULT_CONFIG_PATH, format_color, resolve_color
+from .host import is_windows
 from .g733_notifications import G733NotificationManager
 from .receiver_notifications import ReceiverConnection, ReceiverNotificationManager
 
@@ -32,6 +33,12 @@ PRODUCT_TARGETS = {
 }
 RETRY_DELAYS_SECONDS = (0.5, 1.0, 2.0)
 DEBOUNCE_SECONDS = 3.0
+# The RAM needs the PawnIO driver, which can load after the service starts at boot and
+# raises no device event. After a startup or resume apply that missed the RAM, a bounded
+# series of later single attempts (about 4 minutes in all) picks it up; Linux does not
+# use it.
+LATE_RETRY_TARGET = "ram"
+LATE_RETRY_DELAYS_SECONDS = (5.0, 10.0, 20.0, 30.0, 60.0, 60.0, 60.0)
 
 
 def _property(device: Any, name: str) -> str | None:
@@ -69,6 +76,12 @@ def event_identity(device: Any) -> str:
     return str(getattr(device, "sys_path", "unknown-hidraw"))
 
 
+def _start_daemon(run: Callable[[], None]) -> threading.Thread:
+    thread = threading.Thread(target=run, name="photon-late-retry", daemon=True)
+    thread.start()
+    return thread
+
+
 @dataclass
 class DeviceMonitor:
     """Apply at startup, then only after relevant device-arrival events."""
@@ -81,31 +94,68 @@ class DeviceMonitor:
     sleep: Callable[[float], None] = time.sleep
     seen: dict[str, float] = field(default_factory=dict)
     apply_lock: threading.Lock = field(default_factory=threading.Lock)
+    late_retry_delays: tuple[float, ...] = ()
+    stop_event: threading.Event | None = None
+    # Returns True when the monitor is stopping; tests replace it and the thread starter.
+    late_wait: Callable[[float], bool] | None = None
+    start_thread: Callable[[Callable[[], None]], Any] | None = None
+    _late_thread: Any = None
 
-    def _apply(self, target: str | None, reason: str) -> bool:
+    def _apply(self, target: str | None, reason: str, retry_delays: tuple[float, ...] | None = None) -> bool:
+        delays = self.retry_delays if retry_delays is None else retry_delays
         with self.apply_lock:
-            for attempt in range(len(self.retry_delays) + 1):
+            for attempt in range(len(delays) + 1):
                 result = self.apply(self.color, target)
                 if getattr(result, "applied", ()):
                     LOGGER.info("applied %s to %s after %s", format_color(self.color),
                                 ", ".join(result.applied), reason)
                     return True
-                if attempt == len(self.retry_delays):
+                if attempt == len(delays):
                     failures = "; ".join(getattr(result, "failures", ())) or "no matching target found"
                     LOGGER.warning("could not apply RGB after %s: %s", reason, failures)
                     return False
-                delay = self.retry_delays[attempt]
+                delay = delays[attempt]
                 LOGGER.info("RGB target not ready after %s; retrying in %.1fs", reason, delay)
                 self.sleep(delay)
             return False  # pragma: no cover - loop always returns
 
-    def apply_startup(self) -> bool:
+    def apply_startup(self, reason: str = "startup") -> bool:
         # Run each target independently so one missing device cannot prevent a
         # not-yet-ready peer from receiving its bounded startup retries.
         successful = False
+        late = False
         for target in ("g733", "g502", "keyboard", "ram", "motherboard"):
-            successful = self._apply(target, "startup") or successful
+            applied = self._apply(target, reason)
+            successful = applied or successful
+            late = late or (target == LATE_RETRY_TARGET and not applied)
+        if late and self.late_retry_delays:
+            self._start_late_retry(reason)
         return successful
+
+    def _wait(self, delay: float) -> bool:
+        """Wait before a late attempt; True when the monitor is stopping."""
+        if self.late_wait is not None:
+            return self.late_wait(delay)
+        if self.stop_event is not None:
+            return self.stop_event.wait(delay)
+        self.sleep(delay)
+        return False
+
+    def _start_late_retry(self, reason: str) -> None:
+        if self._late_thread is not None and getattr(self._late_thread, "is_alive", lambda: False)():
+            return  # one series at a time; it is still trying
+        starter = self.start_thread or _start_daemon
+        self._late_thread = starter(lambda: self.retry_late(LATE_RETRY_TARGET, reason))
+
+    def retry_late(self, target: str, reason: str) -> bool:
+        """Single attempts at growing intervals, for a prerequisite that loads after boot."""
+        for delay in self.late_retry_delays:
+            if self._wait(delay):
+                return False
+            if self._apply(target, f"{reason} (late retry)", retry_delays=()):
+                return True
+        LOGGER.warning("gave up applying RGB to %s after %s: still unavailable", target, reason)
+        return False
 
     def handle_event(self, device: Any) -> bool:
         target = target_for_event(device)
@@ -143,6 +193,11 @@ def _apply_available(color: tuple[int, int, int], target: str | None):
 
 def run_monitor(*, config_path: str = str(DEFAULT_CONFIG_PATH)) -> None:
     """Run the blocking pyudev monitor loop used by the systemd unit."""
+    if is_windows():
+        from .windows_monitor import run_foreground
+
+        run_foreground(config_path)
+        return
     color = resolve_color(None, config_path)
     monitor = DeviceMonitor(color=color, apply=_apply_available)
 
@@ -175,6 +230,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="TOML configuration path")
     args = parser.parse_args(argv)
+    if is_windows():
+        # Started by the Service Control Manager this hosts the service; from a console it
+        # runs in the foreground.
+        from .windows_service import run_hosted
+
+        return run_hosted(args.config)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     run_monitor(config_path=args.config)
     return 0

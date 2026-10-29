@@ -122,13 +122,13 @@ sudo photon probe motherboard --json
 `photon --help` and `photon <command> --help` list every option; `--trace` shows the
 protocol traffic.
 
-## Windows (command line)
+## Windows
 
 On Windows, Photon sets the color on the Logitech G733, G502 X Plus (wired or through its
 receiver), PRO keyboard and Gigabyte Z790 AORUS ELITE AX motherboard, and on the Corsair
-Vengeance RGB DDR5 RAM, from the command line. The background service is not available on
-Windows yet. `photon apply` reports every device it could not reach, with the reason, and
-applies the others.
+Vengeance RGB DDR5 RAM, from the command line or as a background service that applies the
+color at boot, on resume and on every device reconnect. `photon apply` reports every device
+it could not reach, with the reason, and applies the others.
 
 Requirements: Windows 10 or 11 and `photon.exe` (built with `python tools\build_bundle.py`,
 which produces `dist\photon.exe`). The Logitech devices and the motherboard need no driver.
@@ -161,6 +161,66 @@ The options and the output are the same as on Linux. Without `--color`, the colo
 `%ProgramData%\Photon\config.toml`, in the same format as on Linux; a missing file means
 the default color.
 
+### Windows service
+
+Download `photon.exe` and `SHA256SUMS` from the latest release and check the file:
+
+```bat
+certutil -hashfile photon.exe SHA256
+```
+
+The hash must match the `photon.exe` line of `SHA256SUMS`. Then, from an **elevated prompt**
+(Run as administrator):
+
+```bat
+photon.exe service check
+photon.exe service install
+```
+
+`service check` reports the missing prerequisites without changing anything; a missing
+PawnIO disables the RAM only. `service install`:
+
+- copies the executable to `%ProgramFiles%\Photon\photon.exe`;
+- creates `%ProgramData%\Photon\config.toml` with the default color when it is absent, in a
+  folder that only Administrators and SYSTEM can write to;
+- creates the `Photon` service, running as LocalSystem, with automatic start (not delayed),
+  `PlugPlay` as its only dependency, and a restart on failure, then starts it.
+
+Running the install again upgrades the executable and restarts the service. The service
+starts during boot, before anybody signs in, and applies the configured color to every
+available device, so the sign-in screen already shows it. It applies again when the machine
+resumes from sleep or hibernation, which includes the power-on after a Shut down with Fast
+Startup, and whenever a supported device is plugged in or reconnects. If PawnIO's driver
+loads after the service started, the RAM is retried for a few minutes. Its log is
+`%ProgramData%\Photon\photon.log`.
+
+```bat
+photon.exe service status
+photon.exe service restart
+```
+
+`restart`, `install` and `uninstall` need an elevated prompt and change nothing without one.
+After editing `%ProgramData%\Photon\config.toml`, apply it with `photon.exe service restart`.
+
+#### Checking the service by hand
+
+The sign-in screen cannot be checked by a test. After installing, with the service running,
+first set every device to another color so the check shows a change:
+`photon.exe apply --color "#FF0000"`.
+
+1. **Restart.** From the Start menu, choose Restart. At the sign-in screen, without signing
+   in, every connected supported device shows the configured color.
+2. **Shut down with Fast Startup.** Set another color as above, choose Shut down (Fast
+   Startup on, the default), then power the machine on. At the sign-in screen every
+   connected supported device shows the configured color.
+3. **Resume from sleep.** Set another color as above, choose Sleep from the Start menu, wait
+   for the machine to be asleep, then wake it with the keyboard or the power button. On the
+   lock screen, without signing in, every connected supported device shows the configured
+   color. Repeat with Hibernate (`shutdown /h`) if you like. `%ProgramData%\Photon\photon.log`
+   then has a line `resumed from sleep or hibernation`.
+4. **Reconnect.** Unplug a supported device (or switch the G733 off and on), and plug it back:
+   it shows the configured color again.
+
 ## Uninstallation
 
 ```sh
@@ -169,6 +229,15 @@ sudo photon service uninstall
 
 This removes the service, the executable and the command link, and keeps
 `/etc/photon/config.toml`.
+
+On Windows, from an elevated prompt:
+
+```bat
+photon.exe service uninstall
+```
+
+This stops and removes the service and `%ProgramFiles%\Photon\photon.exe`, and keeps
+`%ProgramData%\Photon\config.toml`.
 
 ## Building from source
 

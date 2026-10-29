@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from .host import is_windows
 from .hid_transport import HidSession, HidTransport
 from .hidpp import DEFAULT_DEVICE_INDEX, HidppClient, SHORT_REPORT_ID
 
@@ -58,11 +59,14 @@ class ConnectionTransitions:
 def receiver_notification_paths(devices: list[dict[str, Any]]) -> tuple[str, ...]:
     """Return descriptor-verified vendor HID++ channels for supported receivers."""
     paths: list[str] = []
+    # One Linux hidraw node carries both report IDs. Windows splits them into collections
+    # with their own paths, and the link notifications are short reports (0x10).
+    required = {SHORT_REPORT_ID} if is_windows() else {0x10, 0x11}
     for device in devices:
         if device.get("vendor_id") != "046d" or device.get("product_id") != RECEIVER_PRODUCT_ID:
             continue
         for interface in device.get("interfaces", ()):
-            if {0x10, 0x11}.issubset(set(interface.get("report_ids") or ())):
+            if required.issubset(set(interface.get("report_ids") or ())):
                 path = interface.get("hidapi_path")
                 if path and path not in paths:
                     paths.append(path)

@@ -9,3 +9,4 @@ Each slice document specifies scope, non-goals, verification, and definition of 
 17. [Root system service](17-root-system-service.md)
 18. [Standalone fan RGB experiment](18-fan-rgb-test.md)
 19. [Motherboard/fan RGB in the service](19-motherboard-rgb-service.md)
+20. [Windows service and reconnect monitoring](20-windows-service.md)

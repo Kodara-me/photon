@@ -7,11 +7,10 @@ updates or removes a driver. Every transaction holds the shared Windows SMBus mu
 from __future__ import annotations
 
 import ctypes
-import os
 import sys
 from pathlib import Path
 
-from .host import is_windows
+from .host import is_windows, program_files_folders
 
 SMBUS_MUTEX_NAME = "Global\\Access_SMBUS.HTP.Method"
 MUTEX_WAIT_SECONDS = 5.0
@@ -44,15 +43,19 @@ class SmbusMutexBusy(RamUnavailable):
     """Another program held the shared SMBus mutex for the whole bounded wait."""
 
 
-def library_candidates(env: dict[str, str] | None = None) -> list[Path]:
-    environment = os.environ if env is None else env
-    roots = [environment.get("ProgramFiles"), environment.get("ProgramW6432")]
-    return [Path(root) / "PawnIO" / LIBRARY_NAME for root in roots if root]
+def library_candidates(folders: list[Path] | None = None) -> list[Path]:
+    """Where PawnIO's installer puts the library.
+
+    The service runs as LocalSystem, so the ``Program Files`` folders come from the shell's
+    known-folder API, not from environment variables the starting process could set.
+    """
+    roots = program_files_folders() if folders is None else folders
+    return [Path(root) / "PawnIO" / LIBRARY_NAME for root in roots]
 
 
-def find_library(env: dict[str, str] | None = None) -> Path | None:
+def find_library(folders: list[Path] | None = None) -> Path | None:
     """Return the installed ``PawnIOLib.dll``, or None when PawnIO is not installed."""
-    for candidate in library_candidates(env):
+    for candidate in library_candidates(folders):
         if candidate.is_file():
             return candidate
     return None
@@ -160,15 +163,29 @@ def open_smbus_library():
     module = module_blob_path()
     if not module.is_file():
         raise RamUnavailable(f"the PawnIO i801 module is missing ({module})")
-    mutex = SmbusMutex()
-    library = PawnIoLibrary(library_path)
+    mutex = None
+    library = None
     try:
+        mutex = SmbusMutex()
+        library = PawnIoLibrary(library_path)
         library.open(module.read_bytes())
-    except OSError as exc:
-        library.close()
-        mutex.close()
-        raise RamUnavailable(str(exc)) from exc
+    except (OSError, AttributeError) as exc:
+        # AttributeError: the library lacks an entry point Photon needs (wrong or damaged DLL).
+        _close_quietly(library, mutex)
+        raise RamUnavailable(f"cannot open PawnIO: {exc}") from exc
+    except BaseException:
+        _close_quietly(library, mutex)
+        raise
     return library, mutex
+
+
+def _close_quietly(library, mutex) -> None:
+    for resource in (library, mutex):
+        if resource is not None:
+            try:
+                resource.close()
+            except (OSError, AttributeError):
+                pass
 
 
 class PawnIoSmbus:

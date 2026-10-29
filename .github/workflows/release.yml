@@ -1,5 +1,7 @@
-# On a version tag, builds the standalone bundle (tests included) and attaches it, the
-# source archive and their checksums to a draft release, which the maintainer publishes.
+# On a version tag, builds the standalone Linux bundle and the Windows executable (tests
+# included), each in its own job, then one final job writes SHA256SUMS over every file and
+# attaches them, the source archive and the one-command installer to a draft release,
+# which the maintainer publishes. Only the final job writes SHA256SUMS or the release.
 name: Release
 
 on:
@@ -15,8 +17,8 @@ permissions:
   contents: write
 
 jobs:
-  bundle:
-    name: Bundle and draft the release
+  linux:
+    name: Build the Linux bundle
     # The oldest supported runner: the bundle runs on hosts whose glibc is at least as new.
     runs-on: ubuntu-22.04
     env:
@@ -52,23 +54,99 @@ jobs:
       - name: Test
         run: build/venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 
-      - name: Assets
-        # `photon` and `get-photon.sh` keep fixed names so releases/latest/download/ always works.
+      - name: Check the bundle
+        run: test "$(dist/photon --version)" = "photon $VERSION"
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: photon-linux
+          path: dist/photon
+          if-no-files-found: error
+
+  windows:
+    name: Build the Windows executable
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # hidapi publishes a Windows wheel for this Python.
+          python-version: '3.12'
+
+      - name: Check the version
+        shell: bash
         run: |
-          test "$(dist/photon --version)" = "photon $VERSION"
+          version="${TAG#v}"
+          package=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' photon/__init__.py)
+          if [ "$version" != "$package" ]; then
+            echo "::error::tag $TAG does not match __version__ $package in photon/__init__.py"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build the executable
+        # Creates build\venv with the pinned requirements, then dist\photon.exe.
+        run: python tools/build_bundle.py
+
+      - name: Test
+        run: build\venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
+
+      - name: Check the executable
+        shell: bash
+        run: test "$(dist/photon.exe --version | tr -d '\r')" = "photon $VERSION"
+
+      - name: Upload the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: photon-windows
+          path: dist/photon.exe
+          if-no-files-found: error
+
+  release:
+    name: Checksum and draft the release
+    needs: [linux, windows]
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Download the build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assets
+        # `photon`, `photon.exe` and `get-photon.sh` keep fixed names so releases/latest/download/
+        # always works.
+        run: |
+          VERSION="${TAG#v}"
           mkdir release
-          cp dist/photon release/photon
+          cp artifacts/photon-linux/photon release/photon
+          cp artifacts/photon-windows/photon.exe release/photon.exe
+          chmod +x release/photon
           git archive --format=tar.gz --prefix="photon-$VERSION/" -o "release/photon-$VERSION.tar.gz" "$TAG"
           # The one-command installer, served by releases/latest/download/ too.
           cp scripts/get-photon.sh release/
           cd release
-          sha256sum photon "photon-$VERSION.tar.gz" get-photon.sh > SHA256SUMS
+          sha256sum photon photon.exe "photon-$VERSION.tar.gz" get-photon.sh > SHA256SUMS
           cat SHA256SUMS
 
       - name: Draft the release
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION="${TAG#v}"
           notes="docs/release-notes/$VERSION.md"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber --repo "$GITHUB_REPOSITORY"
