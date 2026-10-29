@@ -5,13 +5,17 @@ Protocol and measured identities are recorded in docs/slices/18-fan-rgb-test.md.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import struct
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+try:  # Linux-only: the Windows implementation arrives with its own task.
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
 
 Trace = Callable[[str, bytes], None]
 

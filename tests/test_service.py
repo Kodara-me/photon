@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,7 @@ from unittest import mock
 from photon import service
 
 
+@unittest.skipUnless(hasattr(os, "geteuid"), "the systemd service is Linux-only")
 class ServiceTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

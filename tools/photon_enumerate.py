@@ -12,8 +12,16 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterable
 
-import hidraw as hid
-import pyudev
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from photon.host import infer_report_ids, is_windows, load_hid_backend
+
+hid = load_hid_backend()
+try:  # Linux-only metadata source
+    import pyudev
+except ImportError:  # pragma: no cover - Windows
+    pyudev = None  # type: ignore[assignment]
 
 
 SUPPORTED_DEVICES = {
@@ -41,6 +49,8 @@ def _hidraw_path(value: Any) -> str | None:
     text = _text(value)
     if not text:
         return None
+    if is_windows():  # Windows paths are device interface strings, kept as given.
+        return text
     return text if text.startswith("/") else "/dev/" + text
 
 
@@ -162,7 +172,46 @@ def _merge_hidapi_entries(entries: Iterable[dict[str, Any]]) -> list[dict[str, A
     return list(merged.values())
 
 
+def _is_vendor_collection(collections: list[dict[str, Any]]) -> bool:
+    """Whether any collection sits on a vendor-defined usage page (0xFF00 and above)."""
+    return any((collection["usage_page"] or 0) >= 0xFF00 for collection in collections)
+
+
+def _windows_record(raw: dict[str, Any]) -> dict[str, Any]:
+    """Build an interface record from hidapi fields alone; Linux-only fields are absent."""
+    vendor_id = int(raw["vendor_id"])
+    product_id = int(raw["product_id"])
+    product = raw.get("product") or SUPPORTED_DEVICES.get((vendor_id, product_id))
+    serial = raw.get("serial")
+    number = raw.get("interface_number")
+    report_ids = sorted(
+        {
+            report_id
+            for collection in raw["collections"]
+            for report_id in infer_report_ids(collection["usage_page"], collection["usage"])
+        }
+    )
+    return {
+        "group_id": f"hid:{serial or ''}:{vendor_id:04x}:{product_id:04x}",
+        "vendor_id": f"{vendor_id:04x}",
+        "product_id": f"{product_id:04x}",
+        "manufacturer": raw.get("manufacturer"),
+        "product": product,
+        "serial": serial,
+        "hidapi_path": raw["path"],
+        "usb_path": None,
+        "usb_sysfs_path": None,
+        "interface_number": f"{number:02d}" if isinstance(number, int) and number >= 0 else None,
+        "hid_unique": serial or None,
+        "report_ids": tuple(report_ids),
+        "release_number": raw.get("release_number"),
+        "collections": sorted(raw["collections"], key=lambda x: (x["usage_page"] or -1, x["usage"] or -1)),
+    }
+
+
 def _record(raw: dict[str, Any]) -> dict[str, Any]:
+    if is_windows():
+        return _windows_record(raw)
     hidraw = raw["path"]
     sysfs_device = _sysfs_for_hidraw(hidraw)
     udev = _udev_properties(hidraw)
@@ -214,8 +263,13 @@ def enumerate_devices(include_all: bool = False) -> list[dict[str, Any]]:
     supported = []
     for entry in _merge_hidapi_entries(raw_entries):
         identity = (int(entry["vendor_id"]), int(entry["product_id"]))
-        if include_all or identity in SUPPORTED_DEVICES:
-            supported.append(_record(entry))
+        if not (include_all or identity in SUPPORTED_DEVICES):
+            continue
+        # Windows lists every top-level collection (keyboard, consumer control, ...) as its
+        # own path; only the vendor-defined ones can carry HID++.
+        if is_windows() and not include_all and not _is_vendor_collection(entry["collections"]):
+            continue
+        supported.append(_record(entry))
 
     groups: OrderedDict[str, dict[str, Any]] = OrderedDict()
     for interface in supported:
@@ -237,13 +291,16 @@ def enumerate_devices(include_all: bool = False) -> list[dict[str, Any]]:
 
     result = list(groups.values())
     for group in result:
-        group["interfaces"].sort(key=lambda x: (x.get("interface_number") or "", x.get("hidraw") or ""))
+        group["interfaces"].sort(key=lambda x: (x.get("interface_number") or "", x.get("hidraw") or x.get("hidapi_path") or ""))
     result.sort(key=lambda x: (x["vendor_id"], x["product_id"], x.get("usb_path") or "", x["group_id"]))
     return result
 
 
 def _format_interface(interface: dict[str, Any]) -> list[str]:
-    lines = [f"    - hidraw: {interface.get('hidraw') or '<unknown>'}"]
+    if "hidraw" in interface or not is_windows():
+        lines = [f"    - hidraw: {interface.get('hidraw') or '<unknown>'}"]
+    else:
+        lines = [f"    - path: {interface.get('hidapi_path') or '<unknown>'}"]
     for label, key in (
         ("interface", "interface_number"),
         ("hid physical path", "hid_physical_path"),

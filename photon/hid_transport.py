@@ -8,7 +8,9 @@ from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
 from typing import Any
 
-import hidraw as hid
+from .host import is_windows, load_hid_backend
+
+hid = load_hid_backend()
 
 
 @dataclass(frozen=True)
@@ -26,7 +28,7 @@ class AccessResult:
 
 
 class HidTransportError(OSError):
-    """A bounded hidraw transport failure with a stable status."""
+    """A bounded hidapi transport failure with a stable status."""
 
     def __init__(self, status: str, path: str, message: str):
         super().__init__(message)
@@ -82,7 +84,7 @@ def _path_bytes(path: str | bytes) -> bytes:
     """Return the native byte path required by hidapi's open_path()."""
     if isinstance(path, bytes):
         return path
-    return os.fsencode(path)
+    return path.encode() if is_windows() else os.fsencode(path)
 
 
 def _errno_from_exception(exc: BaseException) -> int | None:
@@ -106,12 +108,13 @@ def _classify_os_error(exc: OSError) -> str:
 class HidTransport:
     """Thin wrapper around hidapi; it does not read or write reports."""
 
-    def __init__(self, device_factory: Any = hid.device):
-        self._device_factory = device_factory
+    def __init__(self, device_factory: Any = None):
+        self._device_factory = hid.device if device_factory is None else device_factory
 
     def probe_open_close(self, path: str | bytes) -> AccessResult:
         text_path = _path_text(path)
-        node_exists = os.path.exists(text_path)
+        # Windows device paths are interface strings, not file system nodes.
+        node_exists = True if is_windows() else os.path.exists(text_path)
         if not node_exists:
             return AccessResult(text_path, "missing_node", False)
 
@@ -143,15 +146,20 @@ class HidTransport:
     def open_session(self, path: str | bytes) -> HidSession:
         """Open a device for bounded raw report exchanges."""
         text_path = _path_text(path)
-        if not os.path.exists(text_path):
-            raise HidTransportError("missing_node", text_path, "hidraw node does not exist")
+        if not is_windows() and not os.path.exists(text_path):
+            raise HidTransportError("missing_node", text_path, "HID node does not exist")
         device = self._device_factory()
         try:
             device.open_path(_path_bytes(path))
         except PermissionError as exc:
             raise HidTransportError("permission_denied", text_path, str(exc)) from exc
         except OSError as exc:
-            raise HidTransportError(_classify_os_error(exc), text_path, str(exc)) from exc
+            status = _classify_os_error(exc)
+            message = str(exc)
+            if is_windows() and status == "transport_error":
+                # hidapi reports a bare "open failed" on Windows, whatever the cause.
+                message = f"{message}; the device may be held by another program"
+            raise HidTransportError(status, text_path, message) from exc
         except Exception as exc:
             raise HidTransportError("transport_error", text_path, str(exc)) from exc
         return HidSession(device, text_path)

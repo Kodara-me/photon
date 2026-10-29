@@ -127,6 +127,38 @@ sudo photon probe motherboard --json
 `photon --help` et `photon <commande> --help` listent toutes les options ; `--trace` affiche
 les échanges du protocole.
 
+## Windows (ligne de commande)
+
+Sous Windows, Photon applique la couleur au Logitech G733, au G502 X Plus (filaire ou par
+son récepteur) et au clavier PRO depuis la ligne de commande. La carte mère, la RAM et le
+service en arrière-plan ne sont pas encore disponibles sous Windows ; `photon apply` les
+signale comme indisponibles et applique les autres appareils.
+
+Prérequis : Windows 10 ou 11 et `photon.exe` (compilé avec `python tools\build_bundle.py`, qui
+produit `dist\photon.exe`). Ces appareils ne demandent aucun pilote.
+
+Désactivez d’abord l’éclairage des logiciels constructeurs. Photon n’arrête, ne reconfigure
+et ne détecte aucun autre logiciel, et un appareil qu’un autre programme occupe est signalé
+comme indisponible :
+
+1. Dans Logitech G HUB, ouvrez chaque appareil, allez dans ses réglages d’éclairage et
+   coupez l’éclairage (ou quittez G HUB).
+2. Dans les Paramètres de Windows, ouvrez Personnalisation, Éclairage dynamique et
+   désactivez « Utiliser l’éclairage dynamique sur mes appareils » (ou désactivez-le pour les
+   appareils gérés par Photon).
+
+Lancez ensuite Photon depuis une invite de commandes :
+
+```bat
+photon.exe apply --color "#8B5CF6"
+photon.exe g733 --color "#00FF00" --zone 0
+photon.exe probe g502 --json
+```
+
+Les options et la sortie sont les mêmes que sous Linux. Sans `--color`, la couleur vient de
+`%ProgramData%\Photon\config.toml`, au même format que sous Linux ; si le fichier est
+absent, la couleur par défaut s’applique.
+
 ## Désinstallation
 
 ```sh

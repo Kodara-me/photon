@@ -6,9 +6,10 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from .host import default_config_path
 from .rgb import parse_color
 
-DEFAULT_CONFIG_PATH = Path("/etc/photon/config.toml")
+DEFAULT_CONFIG_PATH = default_config_path()
 DEFAULT_COLOR_HEX = "#8B5CF6"
 DEFAULT_COLOR = (0x8B, 0x5C, 0xF6)
 

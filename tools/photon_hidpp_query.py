@@ -10,6 +10,7 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from photon.host import LONG_REPORT_ID, is_windows
 from photon.g733 import G733_PRODUCT_ID, G733_VENDOR_ID
 from photon.hid_transport import HidTransport
 from photon.hidpp import FEATURE_SET, HidppClient, HidppError
@@ -23,6 +24,8 @@ def _g733_path() -> str:
         for device in devices
         if device["vendor_id"] == G733_VENDOR_ID and device["product_id"] == G733_PRODUCT_ID
         for interface in device["interfaces"]
+        # Windows lists every vendor collection of the headset; only the long-report one is HID++.
+        if not is_windows() or LONG_REPORT_ID in (interface.get("report_ids") or ())
     ]
     if not matches:
         raise RuntimeError("G733 hidraw interface was not found")

@@ -1,9 +1,11 @@
 import json
 import errno
+import sys
 import unittest
 from unittest import mock
 
 from photon.hid_transport import HidTransport
+from tools import photon_enumerate
 from tools.photon_enumerate import _merge_hidapi_entries, _udev_properties, format_text
 
 
@@ -87,6 +89,7 @@ class EnumerationTests(unittest.TestCase):
         self.assertEqual(result.status, "opened")
         device.open_path.assert_called_once_with(b"/dev/hidraw7")
 
+    @unittest.skipIf(sys.platform == "win32", "Windows paths are not file system nodes")
     def test_transport_classifies_missing_node(self):
         device_factory = mock.Mock()
         transport = HidTransport(device_factory=device_factory)
@@ -131,6 +134,7 @@ class EnumerationTests(unittest.TestCase):
         self.assertEqual(result.status, "close_error")
         self.assertEqual(result.error, "close failed")
 
+    @unittest.skipIf(photon_enumerate.pyudev is None, "pyudev is Linux-only")
     @mock.patch("tools.photon_enumerate.pyudev.Devices.from_device_file")
     @mock.patch("tools.photon_enumerate.pyudev.Devices.from_sys_path")
     @mock.patch("tools.photon_enumerate._sysfs_for_hidraw", return_value=None)
