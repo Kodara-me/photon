@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from typing import Any, Protocol
 
 from .config import DEFAULT_COLOR_HEX
-from .host import is_windows, program_data_folder, program_files_folders
+from .host import is_windows, program_data_folder, program_files_folders, system_folder
 
 
 LOGGER = logging.getLogger(__name__)
@@ -280,18 +280,41 @@ def _require_elevated(elevated: Callable[[], bool]) -> None:
         raise RuntimeError(ELEVATION_MESSAGE)
 
 
-def secure_data_directory(directory: Path, run: Callable[..., Any] = subprocess.run) -> None:
+def secure_data_directory(directory: Path, run: Callable[..., Any] = subprocess.run,
+                          icacls: Path | None = None) -> None:
     """Create ``%ProgramData%\\Photon`` with writes limited to Administrators and SYSTEM.
 
-    The configuration is read by a LocalSystem service, so it must not be writable by
-    ordinary users. Inheritance from ProgramData is cut; Users keep read access only.
+    The configuration is read and the log written by a LocalSystem service, so nobody else
+    may be able to write there or to change the folder's permissions. The folder may exist
+    already, created by an ordinary user who then owns it (and keeps ``WRITE_DAC``), so:
+
+    1. the owner of the folder and of everything in it becomes Administrators;
+    2. everything in it goes back to inherited permissions only (no explicit ACEs left);
+    3. the folder stops inheriting from ProgramData and grants SYSTEM and Administrators full
+       control and Users read access; the children inherit exactly that.
+
+    ``/L`` keeps icacls from following links inside the folder.
     """
     directory.mkdir(parents=True, exist_ok=True)
-    run(
-        ["icacls", str(directory), "/inheritance:r",
-         "/grant:r", f"{SYSTEM_SID}:(OI)(CI)F", f"{ADMINISTRATORS_SID}:(OI)(CI)F", f"{USERS_SID}:(OI)(CI)RX"],
-        check=True, capture_output=True,
+    tool = str(icacls or system_folder() / "icacls.exe")
+    folder = str(directory)
+    steps = (
+        [tool, folder, "/setowner", ADMINISTRATORS_SID, "/T", "/C", "/L"],
+        [tool, folder, "/reset", "/T", "/C", "/L"],
+        [tool, folder, "/inheritance:r", "/grant:r", f"{SYSTEM_SID}:(OI)(CI)F",
+         f"{ADMINISTRATORS_SID}:(OI)(CI)F", f"{USERS_SID}:(OI)(CI)RX"],
     )
+    for command in steps:
+        try:
+            run(command, check=True, capture_output=True)
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or b"")
+            if isinstance(detail, bytes):
+                detail = detail.decode(errors="replace")
+            raise RuntimeError(
+                f"cannot restrict the permissions of {directory} (icacls {command[2]} failed with "
+                f"exit code {exc.returncode}): {detail.strip()}"
+            ) from exc
 
 
 def _is_bundle(executable: Path) -> bool:
@@ -371,9 +394,14 @@ def install(executable: Path, *, manager: ServiceManager, layout: Layout,
           f"({layout.executable}).")
 
 
-def uninstall(*, manager: ServiceManager, layout: Layout,
+def uninstall(*, manager: ServiceManager, layout: Layout, executable: Path | None = None,
               elevated: Callable[[], bool] = is_elevated) -> None:
     _require_elevated(elevated)
+    if executable is not None and layout.install_directory.resolve() in executable.resolve().parents:
+        raise RuntimeError(
+            f"this copy of photon.exe is the installed one ({executable}) and cannot remove itself; "
+            "run uninstall from another copy of photon.exe. Nothing was changed"
+        )
     if manager.state() is not None:
         manager.stop()
         manager.delete()
@@ -409,7 +437,7 @@ def main(action: str, executable: Path, *, manager: ServiceManager | None = None
     if action == "install":
         install(executable, manager=manager, layout=layout, elevated=elevated)
     elif action == "uninstall":
-        uninstall(manager=manager, layout=layout, elevated=elevated)
+        uninstall(manager=manager, layout=layout, executable=executable, elevated=elevated)
     elif action == "restart":
         restart(manager=manager, elevated=elevated)
     else:
@@ -433,16 +461,18 @@ class ServiceHost:
         self._resume_pending = False
 
     def run(self) -> None:
+        if self._stop_event.is_set():
+            return  # stopped before it began: no subscription, no startup apply
         if self._configure_logging:
             _configure_logging(self._config_path, hosted=True)
         monitor = self._monitor_factory(self._config_path, self._stop_event)
         with self._lock:
             self._monitor = monitor
             pending, self._resume_pending = self._resume_pending, False
+        if self._stop_event.is_set():
+            return  # stopped while the monitor was being built
         if pending:
             monitor.post_resume()
-        if self._stop_event.is_set():
-            monitor.stop()
         monitor.run()
 
     def stop(self) -> None:

@@ -18,6 +18,8 @@ WINDOWS_DEFAULT_PROGRAM_DATA = r"C:\ProgramData"
 FOLDERID_PROGRAM_FILES = "905e63b6-c1bf-494e-b29c-65b732d3d21a"
 FOLDERID_PROGRAM_FILES_X64 = "6d809377-6af0-444b-8957-a3773f02200e"
 FOLDERID_PROGRAM_DATA = "62ab5d82-fdc1-4dc3-a9dd-070d1d495d97"
+FOLDERID_SYSTEM = "1ac14e77-02e7-4e5d-b744-2eb1ae5198b7"
+WINDOWS_DEFAULT_SYSTEM32 = r"C:\Windows\System32"
 
 # Logitech HID++ report IDs.
 SHORT_REPORT_ID = 0x10
@@ -116,8 +118,12 @@ def program_files_folders(resolver=known_folder) -> list[Path]:
 
 
 def program_data_folder(resolver=known_folder) -> Path:
-    """``ProgramData`` from the shell, falling back to the environment and then ``C:\ProgramData``."""
+    """``ProgramData`` from the shell, falling back to the fixed ``C:\\ProgramData`` only."""
     folder = resolver(FOLDERID_PROGRAM_DATA)
-    if folder is not None:
-        return folder
-    return Path(os.environ.get("ProgramData") or WINDOWS_DEFAULT_PROGRAM_DATA)
+    return folder if folder is not None else Path(WINDOWS_DEFAULT_PROGRAM_DATA)
+
+
+def system_folder(resolver=known_folder) -> Path:
+    """The System32 folder from the shell, so system tools are run by full path."""
+    folder = resolver(FOLDERID_SYSTEM)
+    return folder if folder is not None else Path(WINDOWS_DEFAULT_SYSTEM32)

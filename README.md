@@ -237,7 +237,7 @@ photon.exe service uninstall
 ```
 
 This stops and removes the service and `%ProgramFiles%\Photon\photon.exe`, and keeps
-`%ProgramData%\Photon\config.toml`.
+`%ProgramData%\Photon\config.toml`. Run it from another copy of `photon.exe` (for example the downloaded one), not from the installed one, which cannot remove itself.
 
 ## Building from source
 
