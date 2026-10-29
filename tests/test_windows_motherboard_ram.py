@@ -398,11 +398,20 @@ class PawnIoTransportTests(unittest.TestCase):
 
     def test_the_library_is_looked_up_only_in_the_pawnio_install_folder(self):  # R15
         with tempfile.TemporaryDirectory() as root:
-            env = {"ProgramFiles": root}
-            self.assertIsNone(pawnio.find_library(env))
+            folders = [Path(root)]  # what the known-folder API would return
+            self.assertIsNone(pawnio.find_library(folders))
             (Path(root) / "PawnIO").mkdir()
             (Path(root) / "PawnIO" / "PawnIOLib.dll").write_bytes(b"")
-            self.assertEqual(pawnio.find_library(env), Path(root) / "PawnIO" / "PawnIOLib.dll")
+            self.assertEqual(pawnio.find_library(folders), Path(root) / "PawnIO" / "PawnIOLib.dll")
+
+    def test_the_program_files_folders_come_from_the_shell_not_the_environment(self):  # R15
+        with tempfile.TemporaryDirectory() as root,                 mock.patch.dict("os.environ", {"ProgramFiles": root, "ProgramW6432": root}):
+            library = Path(root) / "PawnIO" / "PawnIOLib.dll"
+            library.parent.mkdir()
+            library.write_bytes(b"")
+            with mock.patch("photon.pawnio.program_files_folders", return_value=[Path("C:/Program Files")]):
+                self.assertEqual(pawnio.library_candidates(), [Path("C:/Program Files/PawnIO/PawnIOLib.dll")])
+                self.assertIsNone(pawnio.find_library())
 
     def test_no_code_path_installs_updates_or_removes_a_driver(self):  # R15
         root = Path(__file__).resolve().parents[1]
@@ -410,7 +419,7 @@ class PawnIoTransportTests(unittest.TestCase):
         for source in [*(root / "photon").glob("*.py"), *(root / "tools").glob("*.py")]:
             text = source.read_text(encoding="utf-8")
             for word in forbidden:
-                if source.name == "service.py":
+                if source.name in {"service.py", "windows_service.py"}:
                     continue  # the Photon service itself, not a driver
                 self.assertNotIn(word, text, f"{source.name}: {word}")
         self.assertFalse(any(name.startswith(("install", "update", "remove")) for name in dir(pawnio)))

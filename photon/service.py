@@ -1,4 +1,4 @@
-"""Install and manage the root-owned Photon systemd service."""
+"""Install and manage the Photon system service: systemd on Linux, the Service Control Manager on Windows."""
 
 from __future__ import annotations
 
@@ -198,6 +198,10 @@ def main(argv: list[str] | None = None, *, executable: Path | None = None) -> in
     parser.add_argument("action", choices=("install", "uninstall", "status", "restart", "check"))
     args = parser.parse_args(argv)
     source = (executable or Path(sys.argv[0])).resolve()
+    if sys.platform == "win32":
+        from .windows_service import main as windows_main
+
+        return windows_main(args.action, source)
     if args.action == "check":
         return check_dependencies()
     if args.action == "install":

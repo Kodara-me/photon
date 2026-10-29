@@ -64,7 +64,14 @@ def fetch_pawnio_module(opener=urllib.request.urlopen, destination: Path = PAWNI
 def platform_arguments() -> list[str]:
     """PyInstaller options for the hidapi backend and event source of the host."""
     if WINDOWS:
-        return ["--collect-all", "hid", "--add-data", f"{PAWNIO_ROOT / PAWNIO_MODULE_NAME};pawnio"]
+        return [
+            "--collect-all", "hid",
+            # The service host and the Service Control Manager client come from pywin32.
+            "--hidden-import", "servicemanager",
+            "--hidden-import", "win32serviceutil",
+            "--hidden-import", "win32service",
+            "--add-data", f"{PAWNIO_ROOT / PAWNIO_MODULE_NAME};pawnio",
+        ]
     return [
         "--collect-all", "hidraw",
         "--collect-all", "pyudev",
@@ -84,7 +91,7 @@ def main() -> int:
     if not VENV_PYTHON.exists():
         run(sys.executable, "-m", "venv", str(BUILD_ROOT / "venv"))
     run(str(VENV_PYTHON), "-m", "pip", "install", "--requirement", str(REQUIREMENTS))
-    run(str(VENV_PYTHON), "-c", "import hid" if WINDOWS else "import hidraw, pyudev")
+    run(str(VENV_PYTHON), "-c", "import hid, win32service, servicemanager" if WINDOWS else "import hidraw, pyudev")
     run(
         str(VENV_PYTHON),
         "-m",

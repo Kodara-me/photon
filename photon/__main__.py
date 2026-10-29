@@ -37,10 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_color_options(apply, zones=False)
     apply.add_argument("--only", choices=DEVICE_COMMANDS, help="apply only one device type")
 
-    monitor = subcommands.add_parser("monitor", help="apply at startup and monitor supported hidraw arrivals")
+    monitor = subcommands.add_parser("monitor", help="apply at startup and monitor supported device arrivals")
     monitor.add_argument("--config", help="TOML configuration path")
 
-    service = subcommands.add_parser("service", help="install or manage the root system service")
+    service = subcommands.add_parser("service", help="install or manage the system service")
     service.add_argument("action", choices=("install", "uninstall", "status", "restart", "check"))
 
     probe = subcommands.add_parser("probe", help="perform a read-only device probe")

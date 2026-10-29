@@ -127,13 +127,14 @@ sudo photon probe motherboard --json
 `photon --help` et `photon <commande> --help` listent toutes les options ; `--trace` affiche
 les échanges du protocole.
 
-## Windows (ligne de commande)
+## Windows
 
 Sous Windows, Photon applique la couleur au Logitech G733, au G502 X Plus (filaire ou par
 son récepteur), au clavier PRO et à la carte mère Gigabyte Z790 AORUS ELITE AX, ainsi qu’à
-la RAM Corsair Vengeance RGB DDR5, depuis la ligne de commande. Le service en arrière-plan
-n’est pas encore disponible sous Windows. `photon apply` signale chaque appareil qu’il n’a
-pas pu atteindre, avec la raison, et applique les autres.
+la RAM Corsair Vengeance RGB DDR5, depuis la ligne de commande ou comme service en
+arrière-plan qui applique la couleur au démarrage, à la reprise et à chaque reconnexion d’un
+appareil. `photon apply` signale chaque appareil qu’il n’a pas pu atteindre, avec la raison,
+et applique les autres.
 
 Prérequis : Windows 10 ou 11 et `photon.exe` (compilé avec `python tools\build_bundle.py`, qui
 produit `dist\photon.exe`). Les appareils Logitech et la carte mère ne demandent aucun pilote.
@@ -169,6 +170,69 @@ Les options et la sortie sont les mêmes que sous Linux. Sans `--color`, la coul
 `%ProgramData%\Photon\config.toml`, au même format que sous Linux ; si le fichier est
 absent, la couleur par défaut s’applique.
 
+### Service Windows
+
+Téléchargez `photon.exe` et `SHA256SUMS` depuis la dernière version, puis vérifiez le fichier :
+
+```bat
+certutil -hashfile photon.exe SHA256
+```
+
+L’empreinte doit correspondre à la ligne `photon.exe` de `SHA256SUMS`. Ensuite, depuis une
+**invite de commandes élevée** (Exécuter en tant qu’administrateur) :
+
+```bat
+photon.exe service check
+photon.exe service install
+```
+
+`service check` signale les prérequis manquants sans rien modifier ; l’absence de PawnIO ne
+désactive que la RAM. `service install` :
+
+- copie l’exécutable dans `%ProgramFiles%\Photon\photon.exe` ;
+- crée `%ProgramData%\Photon\config.toml` avec la couleur par défaut s’il est absent, dans
+  un dossier que seuls les administrateurs et SYSTEM peuvent modifier ;
+- crée le service `Photon`, exécuté sous LocalSystem, en démarrage automatique (non différé),
+  avec `PlugPlay` pour seule dépendance et un redémarrage en cas d’échec, puis le démarre.
+
+Relancer l’installation met à jour l’exécutable et redémarre le service. Le service démarre
+pendant le démarrage de Windows, avant que quiconque ouvre une session, et applique la
+couleur configurée à tous les appareils disponibles : l’écran de connexion l’affiche déjà. Il
+applique de nouveau la couleur à la reprise après veille ou hibernation, y compris la mise
+sous tension qui suit un Arrêt avec démarrage rapide, et chaque fois qu’un appareil pris en
+charge est branché ou se reconnecte. Si le pilote PawnIO se charge après le démarrage du
+service, la RAM est réessayée pendant quelques minutes. Son journal est
+`%ProgramData%\Photon\photon.log`.
+
+```bat
+photon.exe service status
+photon.exe service restart
+```
+
+`restart`, `install` et `uninstall` demandent une invite élevée et ne changent rien sans elle.
+Après avoir modifié `%ProgramData%\Photon\config.toml`, appliquez-le avec
+`photon.exe service restart`.
+
+#### Vérifier le service à la main
+
+L’écran de connexion ne se vérifie pas par un test. Après l’installation, service démarré,
+mettez d’abord tous les appareils sur une autre couleur pour que la vérification se voie :
+`photon.exe apply --color "#FF0000"`.
+
+1. **Redémarrage.** Dans le menu Démarrer, choisissez Redémarrer. À l’écran de connexion, sans
+   ouvrir de session, chaque appareil pris en charge branché affiche la couleur configurée.
+2. **Arrêt avec démarrage rapide.** Mettez une autre couleur comme ci-dessus, choisissez
+   Arrêter (démarrage rapide activé, par défaut), puis rallumez la machine. À l’écran de
+   connexion, chaque appareil pris en charge branché affiche la couleur configurée.
+3. **Reprise après veille.** Mettez une autre couleur comme ci-dessus, choisissez Mettre en
+   veille dans le menu Démarrer, attendez que la machine soit en veille, puis réveillez-la au
+   clavier ou avec le bouton d’alimentation. Sur l’écran de verrouillage, sans ouvrir de
+   session, chaque appareil pris en charge branché affiche la couleur configurée. Répétez avec
+   l’hibernation (`shutdown /h`) si vous le souhaitez. `%ProgramData%\Photon\photon.log`
+   contient alors une ligne `resumed from sleep or hibernation`.
+4. **Reconnexion.** Débranchez un appareil pris en charge (ou éteignez puis rallumez le G733),
+   puis rebranchez-le : il affiche de nouveau la couleur configurée.
+
 ## Désinstallation
 
 ```sh
@@ -177,6 +241,15 @@ sudo photon service uninstall
 
 La commande retire le service, l’exécutable et le lien de commande, et conserve
 `/etc/photon/config.toml`.
+
+Sous Windows, depuis une invite élevée :
+
+```bat
+photon.exe service uninstall
+```
+
+La commande arrête et retire le service et `%ProgramFiles%\Photon\photon.exe`, et conserve
+`%ProgramData%\Photon\config.toml`.
 
 ## Compilation depuis les sources
 
