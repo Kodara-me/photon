@@ -163,6 +163,45 @@ the default color.
 
 ### Windows service
 
+#### One command
+
+From a standard (not elevated) PowerShell:
+
+```powershell
+irm https://github.com/jstmichel/photon/releases/latest/download/get-photon.ps1 | iex
+```
+
+To pass options, use the scriptblock form:
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/jstmichel/photon/releases/latest/download/get-photon.ps1))) -DryRun
+```
+
+Options: `-Version v0.2.0` (a release other than the latest), `-Yes` (answer yes to the
+install question), `-DryRun` (download and check, print the elevated command, change
+nothing), `-Help`. The script:
+
+1. refuses a machine that is not Windows x64, a 32-bit PowerShell and an elevated prompt;
+2. downloads the release's `SHA256SUMS`, and `photon.exe` unless that version is already
+   installed in `%ProgramFiles%\Photon`, and checks the hash;
+3. runs `photon.exe service check` and shows its report; when it fails, nothing is installed;
+4. asks before installing (without `-Yes` it needs an interactive console), then runs
+   `photon.exe service install` through a User Account Control prompt, waits for it and
+   reports its exit code. When it fails or the prompt is cancelled, see
+   `photon.exe service status` and `%ProgramData%\Photon\photon.log`.
+
+Exit codes: 0 when Photon is installed at the release's version, after `-Help` and after a dry
+run whose checks pass; 1 on any other outcome. Run through `irm | iex` or the scriptblock
+form, the script never closes your session: read the code from `$LASTEXITCODE` right after
+the command. Run as a file (`powershell -File get-photon.ps1`), it is the process exit code.
+Read it first if you like: [scripts/get-photon.ps1](scripts/get-photon.ps1).
+
+The installer runs only from a standard prompt, and asks for administrator rights for the
+step that needs them. When User Account Control is turned off, a PowerShell is always
+elevated: install **by hand** instead.
+
+#### By hand
+
 Download `photon.exe` and `SHA256SUMS` from the latest release and check the file:
 
 ```bat

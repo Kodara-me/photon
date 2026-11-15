@@ -132,8 +132,8 @@ jobs:
           path: artifacts
 
       - name: Assets
-        # `photon`, `photon.exe` and `get-photon.sh` keep fixed names so releases/latest/download/
-        # always works.
+        # `photon`, `photon.exe`, `get-photon.sh` and `get-photon.ps1` keep fixed names so
+        # releases/latest/download/ always works.
         run: |
           VERSION="${TAG#v}"
           mkdir release
@@ -142,9 +142,9 @@ jobs:
           chmod +x release/photon
           git archive --format=tar.gz --prefix="photon-$VERSION/" -o "release/photon-$VERSION.tar.gz" "$TAG"
           # The one-command installer, served by releases/latest/download/ too.
-          cp scripts/get-photon.sh release/
+          cp scripts/get-photon.sh scripts/get-photon.ps1 release/
           cd release
-          sha256sum photon photon.exe "photon-$VERSION.tar.gz" get-photon.sh > SHA256SUMS
+          sha256sum photon photon.exe "photon-$VERSION.tar.gz" get-photon.sh get-photon.ps1 > SHA256SUMS
           cat SHA256SUMS
 
       - name: Draft the release

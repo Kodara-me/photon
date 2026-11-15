@@ -172,6 +172,46 @@ absent, la couleur par défaut s’applique.
 
 ### Service Windows
 
+#### En une commande
+
+Depuis un PowerShell standard (non élevé) :
+
+```powershell
+irm https://github.com/jstmichel/photon/releases/latest/download/get-photon.ps1 | iex
+```
+
+Pour passer des options, utilisez la forme avec bloc de script :
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/jstmichel/photon/releases/latest/download/get-photon.ps1))) -DryRun
+```
+
+Options : `-Version v0.2.0` (une version autre que la dernière), `-Yes` (répondre oui à la
+question d’installation), `-DryRun` (télécharger et vérifier, afficher la commande élevée,
+ne rien modifier), `-Help`. Le script :
+
+1. refuse une machine qui n’est pas Windows x64, un PowerShell 32 bits et une invite élevée ;
+2. télécharge le `SHA256SUMS` de la version, et `photon.exe` sauf si cette version est déjà
+   installée dans `%ProgramFiles%\Photon`, puis vérifie l’empreinte ;
+3. lance `photon.exe service check` et affiche son rapport ; s’il échoue, rien n’est installé ;
+4. demande confirmation (sans `-Yes`, il faut une console interactive), puis lance
+   `photon.exe service install` derrière une invite du Contrôle de compte d’utilisateur,
+   attend sa fin et affiche son code de sortie. En cas d’échec ou d’invite annulée, voyez
+   `photon.exe service status` et `%ProgramData%\Photon\photon.log`.
+
+Codes de sortie : 0 quand Photon est installé à la version de la release, après `-Help` et
+après un essai à blanc dont les vérifications réussissent ; 1 dans tout autre cas. Lancé par
+`irm | iex` ou par la forme avec bloc de script, le script ne ferme jamais votre session :
+lisez le code dans `$LASTEXITCODE` juste après la commande. Lancé comme fichier
+(`powershell -File get-photon.ps1`), c’est le code de sortie du processus. Vous pouvez le lire
+avant : [scripts/get-photon.ps1](scripts/get-photon.ps1).
+
+L’installateur ne s’exécute que depuis une invite standard, et demande les droits
+d’administrateur pour l’étape qui en a besoin. Quand le Contrôle de compte d’utilisateur est
+désactivé, un PowerShell est toujours élevé : installez **à la main** à la place.
+
+#### À la main
+
 Téléchargez `photon.exe` et `SHA256SUMS` depuis la dernière version, puis vérifiez le fichier :
 
 ```bat
