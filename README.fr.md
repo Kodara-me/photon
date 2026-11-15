@@ -197,7 +197,7 @@ la commande élevée, ne rien modifier), `-Help`. Le script :
 2. télécharge le `SHA256SUMS` de la version, et `photon.exe` sauf si cette version est déjà
    installée dans `%ProgramFiles%\Photon`, puis vérifie l’empreinte ;
 3. lance `photon.exe service check` et affiche son rapport ; s’il échoue, rien n’est installé ;
-4. quand PawnIO manque (pas de `PawnIOLib.dll` dans `%ProgramFiles%PawnIO`), demande sur la
+4. quand PawnIO manque (pas de `PawnIOLib.dll` dans `%ProgramFiles%\PawnIO`), demande sur la
    console s’il faut l’installer, en nommant sa version et son URL ; `-Yes` ne répond pas à
    cette question, et sans console la proposition est ignorée. Sur un oui, il télécharge
    l’installateur officiel de PawnIO, figé dans le script, vérifie son SHA-256 et son signataire

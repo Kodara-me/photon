@@ -229,7 +229,7 @@ function Start-ElevatedProcess {
 # The PawnIO step (R11-R18). Returns $true to go on, $false to stop the run with code 1 (a failed
 # verification of the installer, R14). A declined, skipped, cancelled or failed install goes on.
 function Invoke-PawnIOStep {
-    param([string]$ProgramFiles, [string]$Work, [switch]$Yes, [switch]$DryRun)
+    param([string]$ProgramFiles, [string]$Work, [switch]$DryRun)
     if (Test-PawnIOInstalled $ProgramFiles) { return $true }
 
     if ($DryRun) {
@@ -366,7 +366,7 @@ function Invoke-PhotonInstall {
                 Write-Fail 'the dependencies above are missing; nothing was changed'
                 return 1
             }
-            if (-not (Invoke-PawnIOStep -ProgramFiles $programFiles -Work $work -Yes:$Yes -DryRun:$DryRun)) { return 1 }
+            if (-not (Invoke-PawnIOStep -ProgramFiles $programFiles -Work $work -DryRun:$DryRun)) { return 1 }
             return 0
         }
 
@@ -392,7 +392,7 @@ function Invoke-PhotonInstall {
             return 1
         }
 
-        if (-not (Invoke-PawnIOStep -ProgramFiles $programFiles -Work $work -Yes:$Yes -DryRun:$DryRun)) { return 1 }
+        if (-not (Invoke-PawnIOStep -ProgramFiles $programFiles -Work $work -DryRun:$DryRun)) { return 1 }
 
         if ($installed) {
             $question = "Upgrade Photon ${installed} to ${releaseVersion}?"

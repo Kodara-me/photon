@@ -674,20 +674,21 @@ class ServiceCheckTests(unittest.TestCase):
             code = windows_service.check_dependencies(**defaults)
         return code, output.getvalue()
 
-    def test_a_missing_pawnio_disables_the_ram_only(self):  # R12, R15
+    def test_a_missing_pawnio_disables_the_ram_only(self):
         code, text = self.check()
         self.assertEqual(code, 0)
         self.assertIn("Only the RAM is disabled", text)
 
-    def test_a_missing_pawnio_points_to_the_installer_and_to_pawnio(self):  # R19
+    def test_R19_a_missing_pawnio_points_to_the_installer_and_to_pawnio(self):
         code, text = self.check()
         self.assertEqual(code, 0)
         self.assertIn("get-photon.ps1", text)
         self.assertIn("https://pawnio.eu", text)
         self.assertIn("photon.exe never installs a driver", text)
 
-    def test_check_and_install_never_download_or_run_anything_for_pawnio(self):  # R19
-        with mock.patch("subprocess.run") as run, mock.patch("subprocess.Popen") as popen, \n                mock.patch("urllib.request.urlopen") as urlopen:
+    def test_R19_check_and_install_never_download_or_run_anything_for_pawnio(self):
+        with mock.patch("subprocess.run") as run, mock.patch("subprocess.Popen") as popen, \
+                mock.patch("urllib.request.urlopen") as urlopen:
             code, _ = self.check()
         self.assertEqual(code, 0)
         for call in (run, popen, urlopen):

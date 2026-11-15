@@ -187,7 +187,7 @@ command, change nothing), `-Help`. The script:
 2. downloads the release's `SHA256SUMS`, and `photon.exe` unless that version is already
    installed in `%ProgramFiles%\Photon`, and checks the hash;
 3. runs `photon.exe service check` and shows its report; when it fails, nothing is installed;
-4. when PawnIO is missing (no `PawnIOLib.dll` in `%ProgramFiles%PawnIO`), asks on the
+4. when PawnIO is missing (no `PawnIOLib.dll` in `%ProgramFiles%\PawnIO`), asks on the
    console whether to install it, naming its version and URL; `-Yes` does not answer that
    question, and without a console the offer is skipped. On a yes it downloads PawnIO's
    official installer, pinned in the script, checks its SHA-256 and its Authenticode signer

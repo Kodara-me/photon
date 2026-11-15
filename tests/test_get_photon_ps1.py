@@ -404,10 +404,12 @@ class PawnIOTests(InstallerTestCase):
         self.assertEqual(self.downloads(log), [], log)
         self.assertEqual(len(self.pawnio_asks(log)), 1, log)
 
-    def test_R13_yes_does_not_answer_the_pawnio_question(self):
-        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="n")
+    def test_R13_a_yes_downloads_the_installer_only_after_the_question(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
+        self.assertEqual(code, 0, output)
         self.assertEqual(len(self.pawnio_asks(log)), 1, log)
-        self.assertEqual([line for line in self.elevated(log) if "PawnIO" in line], [], log)
+        self.assertEqual(len(self.downloads(log)), 1, log)
+        self.assertLess(log.index(self.pawnio_asks(log)[0]), log.index(self.downloads(log)[0]))
 
     def test_R13_without_a_console_the_offer_is_skipped_and_the_run_goes_on(self):
         code, output, log = self.run_flow("-Yes")
