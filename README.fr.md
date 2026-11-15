@@ -139,9 +139,12 @@ et applique les autres.
 Prérequis : Windows 10 ou 11 et `photon.exe` (compilé avec `python tools\build_bundle.py`, qui
 produit `dist\photon.exe`). Les appareils Logitech et la carte mère ne demandent aucun pilote.
 
-La RAM demande [PawnIO](https://pawnio.eu), un pilote signé que vous installez vous-même avec
-son installateur officiel ; Photon n’installe, ne met à jour et ne supprime aucun pilote.
-`photon.exe` embarque le module SMBus i801 signé de PawnIO et utilise `PawnIOLib.dll` dans
+La RAM demande [PawnIO](https://pawnio.eu), un pilote signé. `photon.exe` lui-même n’installe,
+ne met à jour et ne supprime jamais de pilote ; l’installateur Windows en une commande (voir
+« En une commande » plus bas) propose d’installer PawnIO quand il manque, après une
+confirmation explicite, vérifie le téléchargement avant de l’exécuter, et ne met jamais à jour
+ni ne supprime PawnIO. `photon.exe` embarque le module SMBus i801 signé de PawnIO et utilise
+`PawnIOLib.dll` dans
 `%ProgramFiles%\PawnIO`. La RAM n’est atteinte que depuis une **invite de commandes
 élevée** (Exécuter en tant qu’administrateur). Sans PawnIO, sans élévation, ou tant qu’un
 autre programme tient le mutex SMBus de Windows, la RAM est signalée comme indisponible avec
@@ -187,14 +190,24 @@ Pour passer des options, utilisez la forme avec bloc de script :
 ```
 
 Options : `-Version v0.2.0` (une version autre que la dernière), `-Yes` (répondre oui à la
-question d’installation), `-DryRun` (télécharger et vérifier, afficher la commande élevée,
-ne rien modifier), `-Help`. Le script :
+question d’installation, pas celle de PawnIO), `-DryRun` (télécharger et vérifier, afficher
+la commande élevée, ne rien modifier), `-Help`. Le script :
 
 1. refuse une machine qui n’est pas Windows x64, un PowerShell 32 bits et une invite élevée ;
 2. télécharge le `SHA256SUMS` de la version, et `photon.exe` sauf si cette version est déjà
    installée dans `%ProgramFiles%\Photon`, puis vérifie l’empreinte ;
 3. lance `photon.exe service check` et affiche son rapport ; s’il échoue, rien n’est installé ;
-4. demande confirmation (sans `-Yes`, il faut une console interactive), puis lance
+4. quand PawnIO manque (pas de `PawnIOLib.dll` dans `%ProgramFiles%PawnIO`), demande sur la
+   console s’il faut l’installer, en nommant sa version et son URL ; `-Yes` ne répond pas à
+   cette question, et sans console la proposition est ignorée. Sur un oui, il télécharge
+   l’installateur officiel de PawnIO, figé dans le script, vérifie son SHA-256 et son signataire
+   Authenticode (sujet et empreinte) et, seulement si les deux correspondent, le lance derrière
+   une invite du Contrôle de compte d’utilisateur, avec sa propre interface et sans option
+   silencieuse. Un refus, une invite annulée ou un échec de l’installation laissent la RAM
+   désactivée et le script continue ; une vérification en échec n’exécute rien et sort avec le
+   code 1. Cette étape a aussi lieu quand Photon est déjà à jour, et `-DryRun` n’affiche que la
+   version et l’URL ; PawnIO n’est jamais mis à jour, réinstallé ni supprimé ;
+5. demande confirmation (sans `-Yes`, il faut une console interactive), puis lance
    `photon.exe service install` derrière une invite du Contrôle de compte d’utilisateur,
    attend sa fin et affiche son code de sortie. En cas d’échec ou d’invite annulée, voyez
    `photon.exe service status` et `%ProgramData%\Photon\photon.log`.
@@ -227,7 +240,9 @@ photon.exe service install
 ```
 
 `service check` signale les prérequis manquants sans rien modifier ; l’absence de PawnIO ne
-désactive que la RAM. `service install` :
+désactive que la RAM, et renvoie vers `get-photon.ps1` et https://pawnio.eu. Ni
+`service check` ni `service install` ne télécharge, n’installe, ne met à jour ni ne supprime
+jamais PawnIO. `service install` :
 
 - copie l’exécutable dans `%ProgramFiles%\Photon\photon.exe` ;
 - crée `%ProgramData%\Photon\config.toml` avec la couleur par défaut s’il est absent, dans

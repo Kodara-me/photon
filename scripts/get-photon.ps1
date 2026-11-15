@@ -9,7 +9,7 @@
 # Usage: get-photon.ps1 [-Version <tag>] [-Yes] [-DryRun] [-Help]
 #
 #   -Version <tag>  install this release (for example v0.2.0) instead of the latest
-#   -Yes            answer yes to the question that installs the service
+#   -Yes            answer yes to the question that installs the service (not the PawnIO one)
 #   -DryRun         download and check, then print the elevated command without running it
 #   -Help           print this usage
 #
@@ -30,6 +30,18 @@ param(
     [switch]$Help
 )
 
+# --- Pinned PawnIO installer (R14). Bumping PawnIO is a change to this script, released with
+# --- Photon: take the version and the URL from the release page
+# --- https://github.com/namazso/PawnIO.Setup/releases (linked from https://pawnio.eu), download
+# --- the installer only to read its SHA-256 (`certutil -hashfile PawnIO_setup.exe SHA256`) and
+# --- its signature (`Get-AuthenticodeSignature`: Status Valid, SignerCertificate.Subject and
+# --- .Thumbprint), never to run it, and update the five values together.
+$PawnIOVersion = '2.2.0'
+$PawnIOUrl = 'https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe'
+$PawnIOSha256 = '1f519a22e47187f70a1379a48ca604981c4fcf694f4e65b734aaa74a9fba3032'
+$PawnIOSignerSubject = 'E=admin@namazso.eu, CN=namazso.eu, O=namazso, L=Debrecen, C=HU'
+$PawnIOSignerThumbprint = 'F380DCC9F706E2756A5047B832FFE719E1BC35F5'
+
 # --- Small steps: the tests replace these functions, so nothing below needs the network,
 # --- an elevation prompt or a real process.
 
@@ -48,13 +60,17 @@ function Show-Usage {
 Usage: get-photon.ps1 [-Version <tag>] [-Yes] [-DryRun] [-Help]
 
   -Version <tag>  install this release (for example v0.2.0) instead of the latest
-  -Yes            answer yes to the question that installs the service
+  -Yes            answer yes to the question that installs the service (never the PawnIO one)
   -DryRun         download and check, then print the elevated command without running it
   -Help           print this usage
 
 Run it from a standard (not elevated) PowerShell; each step that needs administrator rights
 is started through its own User Account Control prompt. When User Account Control is turned
 off, follow "By hand" in the README instead.
+
+When PawnIO (the driver the RAM needs) is missing, it asks on the console whether to install it
+from its official installer, pinned in this script and verified (SHA-256 and signature) before
+it runs; -Yes does not answer that question, and without a console the offer is skipped.
 
 Exit codes: 0 installed, already installed, dry run that passed or -Help; 1 failure or refusal.
 '@
@@ -174,16 +190,109 @@ function Get-InstalledVersion {
     return $null
 }
 
+# PawnIO is installed when PawnIOLib.dll sits in the PawnIO folder of the 64-bit Program Files
+# folder, the one folder `photon.exe service check` searches (R11).
+function Test-PawnIOInstalled {
+    param([string]$ProgramFiles)
+    return (Test-Path -LiteralPath (Join-Path $ProgramFiles 'PawnIO\PawnIOLib.dll') -PathType Leaf)
+}
+
+# Status, signer certificate subject and thumbprint of a file's Authenticode signature.
+function Get-InstallerSignature {
+    param([string]$Path)
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $certificate = $signature.SignerCertificate
+    return [pscustomobject]@{
+        Status     = [string]$signature.Status
+        Subject    = $(if ($certificate) { $certificate.Subject } else { '' })
+        Thumbprint = $(if ($certificate) { $certificate.Thumbprint } else { '' })
+    }
+}
+
 # Starts a process through a UAC prompt, waits for it and returns its exit code; $null when
 # the prompt was cancelled or the process could not start.
 function Start-ElevatedProcess {
     param([string]$Path, [string[]]$Arguments)
     try {
-        $process = Start-Process -FilePath $Path -ArgumentList $Arguments -Verb RunAs -Wait -PassThru
+        # Start-Process rejects an empty -ArgumentList: PawnIO's installer takes no argument.
+        if ($Arguments -and $Arguments.Count -gt 0) {
+            $process = Start-Process -FilePath $Path -ArgumentList $Arguments -Verb RunAs -Wait -PassThru
+        } else {
+            $process = Start-Process -FilePath $Path -Verb RunAs -Wait -PassThru
+        }
         return $process.ExitCode
     } catch {
         return $null
     }
+}
+
+# The PawnIO step (R11-R18). Returns $true to go on, $false to stop the run with code 1 (a failed
+# verification of the installer, R14). A declined, skipped, cancelled or failed install goes on.
+function Invoke-PawnIOStep {
+    param([string]$ProgramFiles, [string]$Work, [switch]$Yes, [switch]$DryRun)
+    if (Test-PawnIOInstalled $ProgramFiles) { return $true }
+
+    if ($DryRun) {
+        Write-Say "PawnIO is not installed. Would offer to install PawnIO $PawnIOVersion from $PawnIOUrl (a kernel driver needed only for the RAM)."
+        return $true
+    }
+    if (-not (Test-Interactive)) {
+        Write-Say 'PawnIO is not installed and there is no console to ask on: skipping it, the RAM stays disabled. Install it yourself from https://pawnio.eu.'
+        return $true
+    }
+    $question = "PawnIO is not installed. Install PawnIO $PawnIOVersion (download: $PawnIOUrl)? It is a signed kernel driver, needed only for the RAM."
+    # -Yes does not answer this question.
+    if (-not (Read-Answer $question)) {
+        Write-Say 'PawnIO was not installed: the RAM stays disabled. Photon works with every other device.'
+        return $true
+    }
+
+    $installer = Join-Path $Work 'PawnIO_setup.exe'
+    Write-Say "Downloading PawnIO $PawnIOVersion..."
+    try {
+        Invoke-Download $PawnIOUrl $installer
+    } catch {
+        Write-Say "Cannot download ${PawnIOUrl}: the RAM stays disabled. Install PawnIO yourself from https://pawnio.eu."
+        return $true
+    }
+
+    # Held from before the checks until the elevated process has started (R23).
+    $held = Open-HeldFile $installer
+    $failure = $null
+    $code = $null
+    try {
+        if ((Get-FileSha256 $installer) -ne $PawnIOSha256) {
+            $failure = "the downloaded PawnIO installer does not match the pinned SHA-256"
+        } else {
+            $signature = Get-InstallerSignature $installer
+            if ($signature.Status -ne 'Valid') {
+                $failure = "the downloaded PawnIO installer has no valid Authenticode signature (status $($signature.Status))"
+            } elseif ($signature.Subject -cne $PawnIOSignerSubject) {
+                $failure = "the PawnIO installer is signed by '$($signature.Subject)', not by the pinned signer subject"
+            } elseif ($signature.Thumbprint -ne $PawnIOSignerThumbprint) {
+                $failure = "the PawnIO installer's signer certificate thumbprint $($signature.Thumbprint) is not the pinned one"
+            }
+        }
+        if (-not $failure) {
+            Write-Say 'PawnIO installer verified (SHA-256 and signature). Its own interface opens after a User Account Control prompt...'
+            $code = Start-ElevatedProcess $installer @()
+        }
+    } finally {
+        $held.Dispose()
+    }
+    if ($failure) {
+        Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+        Write-Fail "${failure}; it was not run and nothing was installed"
+        return $false
+    }
+    if ($null -eq $code) {
+        Write-Say 'The PawnIO installation was cancelled: the RAM stays disabled.'
+    } elseif ($code -ne 0) {
+        Write-Say "The PawnIO installer exited with code ${code}: the RAM stays disabled."
+    } else {
+        Write-Say 'PawnIO installer finished.'
+    }
+    return $true
 }
 
 # --- Main flow: returns 0 or 1 and never calls `exit`.
@@ -257,6 +366,7 @@ function Invoke-PhotonInstall {
                 Write-Fail 'the dependencies above are missing; nothing was changed'
                 return 1
             }
+            if (-not (Invoke-PawnIOStep -ProgramFiles $programFiles -Work $work -Yes:$Yes -DryRun:$DryRun)) { return 1 }
             return 0
         }
 
@@ -281,6 +391,8 @@ function Invoke-PhotonInstall {
             Write-Fail 'the dependencies above are missing; nothing was installed'
             return 1
         }
+
+        if (-not (Invoke-PawnIOStep -ProgramFiles $programFiles -Work $work -Yes:$Yes -DryRun:$DryRun)) { return 1 }
 
         if ($installed) {
             $question = "Upgrade Photon ${installed} to ${releaseVersion}?"

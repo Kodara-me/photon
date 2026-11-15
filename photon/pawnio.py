@@ -1,7 +1,8 @@
 """SMBus access on Windows through PawnIO's signed Intel i801 module.
 
-Photon uses ``PawnIOLib.dll`` when the user has installed PawnIO; it never installs,
-updates or removes a driver. Every transaction holds the shared Windows SMBus mutex.
+Photon uses ``PawnIOLib.dll`` when PawnIO is installed. ``photon.exe`` itself never installs,
+updates or removes a driver; only the Windows installer script (``get-photon.ps1``) offers to
+install PawnIO, after a confirmation. Every transaction holds the shared Windows SMBus mutex.
 """
 
 from __future__ import annotations

@@ -16,6 +16,17 @@ param(
 $wanted = @{ Version = $Version; Yes = $Yes; DryRun = $DryRun; Help = $Help }
 . $Script
 
+# The pinned PawnIO values are replaced by those of the fake installer in $Root\pawnio (the real
+# ones pin the real installer, which no test downloads).
+$fakeInstaller = Join-Path $Root 'pawnio\PawnIO_setup.exe'
+if ($env:FAKE_PAWNIO_HASH -eq 'wrong') {
+    $PawnIOSha256 = 'e' * 64
+} elseif (Test-Path -LiteralPath $fakeInstaller) {
+    $PawnIOSha256 = Get-FileSha256 $fakeInstaller
+}
+$PawnIOSignerSubject = 'CN=Fake PawnIO Signer'
+$PawnIOSignerThumbprint = '0123456789ABCDEF0123456789ABCDEF01234567'
+
 $log = Join-Path $Root 'log'
 function Write-Log { param([string]$Message) Add-Content -LiteralPath $log -Value $Message }
 
@@ -32,9 +43,23 @@ function Read-Answer {
     return ($env:FAKE_ANSWER -eq 'y')
 }
 
+function Get-InstallerSignature {
+    param([string]$Path)
+    Write-Log "signature: $([IO.Path]::GetFileName($Path))"
+    return [pscustomobject]@{
+        Status     = $(if ($env:FAKE_SIG_STATUS) { $env:FAKE_SIG_STATUS } else { 'Valid' })
+        Subject    = $(if ($env:FAKE_SIG_SUBJECT) { $env:FAKE_SIG_SUBJECT } else { $PawnIOSignerSubject })
+        Thumbprint = $(if ($env:FAKE_SIG_THUMBPRINT) { $env:FAKE_SIG_THUMBPRINT } else { $PawnIOSignerThumbprint })
+    }
+}
+
 function Invoke-Download {
     param([string]$Url, [string]$Path)
     Write-Log "download: $Url"
+    if ($Url -eq $PawnIOUrl) {
+        Copy-Item -LiteralPath $fakeInstaller -Destination $Path
+        return
+    }
     $prefix = 'https://releases.test/'
     if (-not $Url.StartsWith($prefix)) { throw "unexpected URL $Url" }
     $source = Join-Path (Join-Path $Root 'release') $Url.Substring($prefix.Length)
@@ -66,8 +91,9 @@ function Start-ElevatedProcess {
         $probe += 'read=allowed'
     } catch { $probe += 'read=blocked' }
     Write-Log ('probe: ' + ($probe -join ' '))
-    if ($env:FAKE_ELEVATION -eq 'cancel') { return $null }
-    if ($env:FAKE_ELEVATION) { return [int]$env:FAKE_ELEVATION }
+    $outcome = if ($Path.EndsWith('PawnIO_setup.exe')) { $env:FAKE_PAWNIO_ELEVATION } else { $env:FAKE_ELEVATION }
+    if ($outcome -eq 'cancel') { return $null }
+    if ($outcome) { return [int]$outcome }
     return 0
 }
 

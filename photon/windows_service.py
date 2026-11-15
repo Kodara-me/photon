@@ -408,8 +408,8 @@ def check_dependencies(*, importer: Callable[[str], Any] = import_module,
     library = (library_finder or pawnio.find_library)()
     if library is None:
         print("RAM prerequisite: PawnIO is not installed (PawnIOLib.dll not found). Only the RAM is "
-              "disabled; every other device works. Install PawnIO yourself from https://pawnio.eu "
-              "to drive the RAM. Photon never installs a driver.")
+              "disabled; every other device works. Run get-photon.ps1 to be offered PawnIO, or install "
+              "it yourself from https://pawnio.eu. photon.exe never installs a driver.")
     else:
         module = (module_path or pawnio.module_blob_path)()
         if module.is_file():

@@ -98,6 +98,12 @@ class InstallerTestCase(unittest.TestCase):
         self.log.write_text("")
         for folder in ("latest/download", f"download/v{VERSION}"):
             self.release(folder)
+        # A fake PawnIO installer (the driver pins its hash) and PawnIO already installed in the
+        # fake Program Files folder; the PawnIO tests remove it.
+        (self.root / "pawnio").mkdir()
+        (self.root / "pawnio" / "PawnIO_setup.exe").write_bytes(b"fake pawnio installer")
+        (self.root / "pf" / "PawnIO").mkdir(parents=True)
+        (self.root / "pf" / "PawnIO" / "PawnIOLib.dll").write_bytes(b"x")
 
     def release(self, folder, exe_hash=None, with_exe=True):
         directory = self.root / "release" / folder
@@ -330,6 +336,176 @@ class FlowTests(InstallerTestCase):
         self.assertIn("AFTER", output)
         self.assertNotIn("Looking for", output)
         self.assertEqual(self.logged(), [])
+
+
+class PawnIOTests(InstallerTestCase):
+    """The PawnIO step (R11-R18, R23): the download, the signature and the elevation are replaced."""
+
+    run_flow = FlowTests.run_flow
+
+    def setUp(self):
+        super().setUp()
+        shutil.rmtree(self.root / "pf" / "PawnIO", ignore_errors=True)  # PawnIO is missing
+
+    def downloads(self, log):
+        return [line for line in log if line.startswith("download:") and "PawnIO" in line]
+
+    def elevated(self, log):
+        return [line for line in log if line.startswith("elevated:")]
+
+    def pawnio_asks(self, log):
+        return [line for line in log if line.startswith("ask: PawnIO")]
+
+    def test_R11_pawnio_present_makes_no_offer_and_downloads_nothing(self):
+        library = self.root / "pf" / "PawnIO"
+        library.mkdir(parents=True)
+        (library / "PawnIOLib.dll").write_bytes(b"x")
+        code, output, log = self.run_flow(FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("PawnIO", output)
+        self.assertEqual(self.pawnio_asks(log), [], log)
+        self.assertEqual(self.downloads(log), [], log)
+        self.assertEqual([line for line in self.elevated(log) if "PawnIO" in line], [], log)
+
+    def test_R11_a_dll_outside_the_program_files_folder_does_not_count(self):
+        x86 = self.root / "pf (x86)" / "PawnIO"
+        x86.mkdir(parents=True)
+        (x86 / "PawnIOLib.dll").write_bytes(b"x")
+        code, output, log = self.run_flow(FAKE_INTERACTIVE=1, FAKE_ANSWER="n")
+        self.assertEqual(len(self.pawnio_asks(log)), 1, log)
+
+    def test_R12_the_question_names_the_version_and_the_url_and_comes_between_check_and_install(self):
+        code, output, log = self.run_flow(FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
+        self.assertEqual(code, 0, output)
+        asks = [line for line in log if line.startswith("ask:")]
+        self.assertEqual(len(asks), 2, log)
+        self.assertIn("PawnIO 2.2.0", asks[0])
+        self.assertIn("https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe", asks[0])
+        self.assertIn("kernel driver", asks[0])
+        self.assertIn("RAM", asks[0])
+        self.assertTrue(asks[1].startswith(f"ask: Install Photon {VERSION}"), asks)
+        check = next(index for index, line in enumerate(log) if line.endswith("service check"))
+        self.assertLess(check, log.index(asks[0]))
+        self.assertLess(log.index(asks[0]), log.index(asks[1]))
+
+    def test_R12_R14_the_pinned_values_are_present_and_consistent(self):
+        text = SCRIPT.read_text(encoding="utf-8")
+        self.assertRegex(text, r"\$PawnIOVersion = '\d+\.\d+\.\d+'")
+        self.assertRegex(text, r"\$PawnIOSha256 = '[0-9a-f]{64}'")
+        self.assertRegex(text, r"\$PawnIOSignerSubject = '[^']+'")
+        self.assertRegex(text, r"\$PawnIOSignerThumbprint = '[0-9A-F]{40}'")
+        version = re.search(r"\$PawnIOVersion = '([^']+)'", text).group(1)
+        url = re.search(r"\$PawnIOUrl = '([^']+)'", text).group(1)
+        self.assertEqual(url, f"https://github.com/namazso/PawnIO.Setup/releases/download/{version}/PawnIO_setup.exe")
+
+    def test_R13_nothing_is_downloaded_before_a_yes(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="n")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.downloads(log), [], log)
+        self.assertEqual(len(self.pawnio_asks(log)), 1, log)
+
+    def test_R13_yes_does_not_answer_the_pawnio_question(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="n")
+        self.assertEqual(len(self.pawnio_asks(log)), 1, log)
+        self.assertEqual([line for line in self.elevated(log) if "PawnIO" in line], [], log)
+
+    def test_R13_without_a_console_the_offer_is_skipped_and_the_run_goes_on(self):
+        code, output, log = self.run_flow("-Yes")
+        self.assertEqual(code, 0, output)
+        self.assertIn("https://pawnio.eu", output)
+        self.assertEqual(self.pawnio_asks(log), [], log)
+        self.assertEqual(self.downloads(log), [], log)
+        self.assertEqual(len(self.elevated(log)), 1, log)
+        self.assertTrue(self.elevated(log)[0].endswith("photon.exe service install"), log)
+
+    def test_R14_R15_a_yes_downloads_verifies_and_runs_the_installer_without_any_option(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(len(self.downloads(log)), 1, log)
+        self.assertIn("signature: PawnIO_setup.exe", log)
+        elevated = [line for line in self.elevated(log) if "PawnIO" in line]
+        self.assertEqual(len(elevated), 1, log)
+        self.assertTrue(elevated[0].endswith("PawnIO_setup.exe "), elevated)  # nothing after the path
+        self.assertLess(log.index("signature: PawnIO_setup.exe"), log.index(elevated[0]))
+
+    def assert_verification_failure(self, which, **environment):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y", **environment)
+        self.assertEqual(code, 1, output)
+        self.assertIn(which, output)
+        self.assertEqual(self.elevated(log), [], log)
+        self.assertEqual(len(self.pawnio_asks(log)), 1, log)
+        self.assertFalse([line for line in log if line.startswith("ask: Install Photon")], log)
+
+    def test_R14_a_wrong_hash_runs_nothing_and_exits_with_one(self):
+        self.assert_verification_failure("SHA-256", FAKE_PAWNIO_HASH="wrong")
+
+    def test_R14_a_wrong_signer_subject_runs_nothing_and_exits_with_one(self):
+        self.assert_verification_failure("signer subject", FAKE_SIG_SUBJECT="CN=Someone Else")
+
+    def test_R14_a_wrong_signer_thumbprint_runs_nothing_and_exits_with_one(self):
+        self.assert_verification_failure("thumbprint", FAKE_SIG_THUMBPRINT="F" * 40)
+
+    def test_R14_an_invalid_signature_runs_nothing_and_exits_with_one(self):
+        self.assert_verification_failure("Authenticode signature", FAKE_SIG_STATUS="NotSigned")
+
+    def test_R15_the_installer_is_started_before_the_photon_install(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
+        elevated = self.elevated(log)
+        self.assertEqual(len(elevated), 2, log)
+        self.assertIn("PawnIO_setup.exe", elevated[0])
+        self.assertTrue(elevated[1].endswith("photon.exe service install"), elevated)
+
+    def test_R16_a_decline_says_the_ram_stays_disabled_and_goes_on(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="n")
+        self.assertEqual(code, 0, output)
+        self.assertIn("RAM stays disabled", output)
+        self.assertIn("service install exited with code 0", output)
+
+    def test_R16_a_failed_installer_says_the_ram_stays_disabled_and_goes_on(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y", FAKE_PAWNIO_ELEVATION=3)
+        self.assertEqual(code, 0, output)
+        self.assertIn("exited with code 3", output)
+        self.assertIn("RAM stays disabled", output)
+        self.assertIn("service install exited with code 0", output)
+
+    def test_R16_a_cancelled_installer_says_the_ram_stays_disabled_and_goes_on(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y", FAKE_PAWNIO_ELEVATION="cancel")
+        self.assertEqual(code, 0, output)
+        self.assertIn("cancelled", output)
+        self.assertIn("RAM stays disabled", output)
+        self.assertIn("service install exited with code 0", output)
+
+    def test_R17_dry_run_prints_the_version_and_url_and_asks_downloads_and_runs_nothing(self):
+        code, output, log = self.run_flow("-DryRun", FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
+        self.assertEqual(code, 0, output)
+        self.assertIn("PawnIO 2.2.0", output)
+        self.assertIn("https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe", output)
+        self.assertEqual(self.pawnio_asks(log), [], log)
+        self.assertEqual(self.downloads(log), [], log)
+        self.assertEqual(self.elevated(log), [], log)
+
+    def test_R18_the_offer_is_made_when_photon_is_already_up_to_date(self):
+        self.install_photon(VERSION)
+        code, output, log = self.run_flow(FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(len(self.pawnio_asks(log)), 1, log)
+        elevated = self.elevated(log)
+        self.assertEqual(len(elevated), 1, log)
+        self.assertIn("PawnIO_setup.exe", elevated[0])
+        installed = str(self.root / "pf" / "Photon" / "photon.exe")
+        self.assertLess(log.index(f"exe: {installed} service check"), log.index(self.pawnio_asks(log)[0]))
+
+    def test_R18_a_failed_check_makes_no_offer(self):
+        self.install_photon(VERSION)
+        code, output, log = self.run_flow(FAKE_INTERACTIVE=1, FAKE_ANSWER="y", FAKE_CHECK=1)
+        self.assertEqual(code, 1, output)
+        self.assertEqual(self.pawnio_asks(log), [], log)
+
+    def test_R23_the_verified_pawnio_installer_cannot_be_written_renamed_or_deleted(self):
+        code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
+        self.assertEqual(code, 0, output)
+        index = next(i for i, line in enumerate(log) if line.startswith("elevated:") and "PawnIO" in line)
+        self.assertEqual(log[index + 1], "probe: write=blocked rename=blocked delete=blocked read=allowed", log)
 
 
 def _elevation_dependent(test):
