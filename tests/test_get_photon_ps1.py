@@ -350,7 +350,7 @@ class PawnIOTests(InstallerTestCase):
     def downloads(self, log):
         return [line for line in log if line.startswith("download:") and "PawnIO" in line]
 
-    def elevated(self, log):
+    def elevated_lines(self, log):
         return [line for line in log if line.startswith("elevated:")]
 
     def pawnio_asks(self, log):
@@ -365,7 +365,7 @@ class PawnIOTests(InstallerTestCase):
         self.assertNotIn("PawnIO", output)
         self.assertEqual(self.pawnio_asks(log), [], log)
         self.assertEqual(self.downloads(log), [], log)
-        self.assertEqual([line for line in self.elevated(log) if "PawnIO" in line], [], log)
+        self.assertEqual([line for line in self.elevated_lines(log) if "PawnIO" in line], [], log)
 
     def test_R11_a_dll_outside_the_program_files_folder_does_not_count(self):
         x86 = self.root / "pf (x86)" / "PawnIO"
@@ -417,15 +417,15 @@ class PawnIOTests(InstallerTestCase):
         self.assertIn("https://pawnio.eu", output)
         self.assertEqual(self.pawnio_asks(log), [], log)
         self.assertEqual(self.downloads(log), [], log)
-        self.assertEqual(len(self.elevated(log)), 1, log)
-        self.assertTrue(self.elevated(log)[0].endswith("photon.exe service install"), log)
+        self.assertEqual(len(self.elevated_lines(log)), 1, log)
+        self.assertTrue(self.elevated_lines(log)[0].endswith("photon.exe service install"), log)
 
     def test_R14_R15_a_yes_downloads_verifies_and_runs_the_installer_without_any_option(self):
         code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
         self.assertEqual(code, 0, output)
         self.assertEqual(len(self.downloads(log)), 1, log)
         self.assertIn("signature: PawnIO_setup.exe", log)
-        elevated = [line for line in self.elevated(log) if "PawnIO" in line]
+        elevated = [line for line in self.elevated_lines(log) if "PawnIO" in line]
         self.assertEqual(len(elevated), 1, log)
         self.assertTrue(elevated[0].endswith("PawnIO_setup.exe "), elevated)  # nothing after the path
         self.assertLess(log.index("signature: PawnIO_setup.exe"), log.index(elevated[0]))
@@ -434,7 +434,7 @@ class PawnIOTests(InstallerTestCase):
         code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y", **environment)
         self.assertEqual(code, 1, output)
         self.assertIn(which, output)
-        self.assertEqual(self.elevated(log), [], log)
+        self.assertEqual(self.elevated_lines(log), [], log)
         self.assertEqual(len(self.pawnio_asks(log)), 1, log)
         self.assertFalse([line for line in log if line.startswith("ask: Install Photon")], log)
 
@@ -452,7 +452,7 @@ class PawnIOTests(InstallerTestCase):
 
     def test_R15_the_installer_is_started_before_the_photon_install(self):
         code, output, log = self.run_flow("-Yes", FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
-        elevated = self.elevated(log)
+        elevated = self.elevated_lines(log)
         self.assertEqual(len(elevated), 2, log)
         self.assertIn("PawnIO_setup.exe", elevated[0])
         self.assertTrue(elevated[1].endswith("photon.exe service install"), elevated)
@@ -484,14 +484,14 @@ class PawnIOTests(InstallerTestCase):
         self.assertIn("https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe", output)
         self.assertEqual(self.pawnio_asks(log), [], log)
         self.assertEqual(self.downloads(log), [], log)
-        self.assertEqual(self.elevated(log), [], log)
+        self.assertEqual(self.elevated_lines(log), [], log)
 
     def test_R18_the_offer_is_made_when_photon_is_already_up_to_date(self):
         self.install_photon(VERSION)
         code, output, log = self.run_flow(FAKE_INTERACTIVE=1, FAKE_ANSWER="y")
         self.assertEqual(code, 0, output)
         self.assertEqual(len(self.pawnio_asks(log)), 1, log)
-        elevated = self.elevated(log)
+        elevated = self.elevated_lines(log)
         self.assertEqual(len(elevated), 1, log)
         self.assertIn("PawnIO_setup.exe", elevated[0])
         installed = str(self.root / "pf" / "Photon" / "photon.exe")
