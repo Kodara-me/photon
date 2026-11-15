@@ -140,6 +140,8 @@ function Open-HeldFile {
     return [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
 }
 
+# Hashes with .NET on a FileShare.Read stream rather than Get-FileHash: it works with the handle
+# held open for R23 and does not depend on module autoloading.
 function Get-FileSha256 {
     param([string]$Path)
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -281,7 +283,7 @@ function Invoke-PhotonInstall {
         }
 
         if ($installed) {
-            $question = "Upgrade Photon $installed to $releaseVersion?"
+            $question = "Upgrade Photon ${installed} to ${releaseVersion}?"
         } else {
             $question = "Install Photon $releaseVersion as a Windows service?"
         }
